@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.local
+.env.smoke
+*.log
+.DS_Store
+.vite

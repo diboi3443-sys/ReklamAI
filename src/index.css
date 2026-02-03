@@ -1,0 +1,298 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 
+ * ReklamAI Design System — Premium SaaS UI
+ * 
+ * Typography: Inter (neo-grotesk, professional)
+ * Philosophy: Calm, confident, enterprise-ready
+ * Comparable: Linear, Stripe, Runway
+ */
+
+@layer base {
+  :root {
+    /* === LIGHT THEME === */
+    --background: 0 0% 98%;
+    --foreground: 220 15% 15%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 15%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 15%;
+    
+    /* Brand - restrained purple */
+    --primary: 250 60% 52%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 15% 20%;
+    
+    --muted: 220 12% 92%;
+    --muted-foreground: 220 10% 46%;
+    
+    --accent: 250 60% 52%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* UI elements */
+    --border: 220 12% 90%;
+    --input: 220 12% 90%;
+    --ring: 250 60% 52%;
+    
+    --radius: 0.5rem;
+    
+    /* Extended palette */
+    --gradient-start: 250 60% 52%;
+    --gradient-mid: 240 55% 55%;
+    --gradient-end: 220 70% 50%;
+    
+    --surface-elevated: 0 0% 100%;
+    --surface-sunken: 220 12% 96%;
+    
+    --text-primary: 220 15% 15%;
+    --text-secondary: 220 10% 40%;
+    --text-tertiary: 220 10% 55%;
+    
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 85% 48%;
+    --warning-foreground: 0 0% 0%;
+    --info: 210 80% 50%;
+    --info-foreground: 0 0% 100%;
+    
+    --glow-primary: 250 60% 52%;
+    --glow-accent: 240 55% 55%;
+    
+    /* Sidebar */
+    --sidebar-width: 240px;
+    --sidebar-width-collapsed: 56px;
+    --sidebar-background: 0 0% 99%;
+    --sidebar-foreground: 220 15% 15%;
+    --sidebar-primary: 250 60% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 12% 95%;
+    --sidebar-accent-foreground: 220 15% 15%;
+    --sidebar-border: 220 12% 92%;
+    --sidebar-ring: 250 60% 52%;
+  }
+
+  .dark {
+    /* === DARK THEME (PRIMARY) === */
+    --background: 220 16% 8%;
+    --foreground: 220 14% 92%;
+    
+    --card: 220 16% 10%;
+    --card-foreground: 220 14% 92%;
+    
+    --popover: 220 16% 9%;
+    --popover-foreground: 220 14% 92%;
+    
+    /* Brand - slightly lifted for dark */
+    --primary: 250 65% 62%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 220 14% 14%;
+    --secondary-foreground: 220 14% 92%;
+    
+    --muted: 220 14% 16%;
+    --muted-foreground: 220 10% 54%;
+    
+    --accent: 250 65% 62%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* UI elements */
+    --border: 220 14% 16%;
+    --input: 220 14% 14%;
+    --ring: 250 65% 62%;
+    
+    /* Extended palette */
+    --gradient-start: 250 65% 62%;
+    --gradient-mid: 240 60% 58%;
+    --gradient-end: 220 75% 55%;
+    
+    --surface-elevated: 220 16% 12%;
+    --surface-sunken: 220 16% 6%;
+    
+    --text-primary: 220 14% 92%;
+    --text-secondary: 220 10% 64%;
+    --text-tertiary: 220 10% 48%;
+    
+    --success: 152 55% 48%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 85% 52%;
+    --warning-foreground: 0 0% 0%;
+    --info: 210 80% 55%;
+    --info-foreground: 0 0% 100%;
+    
+    --glow-primary: 250 65% 62%;
+    --glow-accent: 240 60% 58%;
+    
+    /* Sidebar */
+    --sidebar-background: 220 16% 7%;
+    --sidebar-foreground: 220 14% 92%;
+    --sidebar-primary: 250 65% 62%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 12%;
+    --sidebar-accent-foreground: 220 14% 92%;
+    --sidebar-border: 220 14% 14%;
+    --sidebar-ring: 250 65% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring/50 ring-offset-1 ring-offset-background;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.15);
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* === GRADIENT UTILITIES (restrained) === */
+  .gradient-brand {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--gradient-start)) 0%,
+      hsl(var(--gradient-end)) 100%
+    );
+  }
+  
+  .gradient-brand-subtle {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--gradient-start) / 0.08) 0%,
+      hsl(var(--gradient-end) / 0.05) 100%
+    );
+  }
+  
+  .gradient-text {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--gradient-start)) 0%,
+      hsl(var(--gradient-end)) 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  /* === GLOW EFFECTS (subtle) === */
+  .glow-primary {
+    box-shadow: 0 0 12px hsl(var(--glow-primary) / 0.15);
+  }
+  
+  .glow-primary-sm {
+    box-shadow: 0 0 6px hsl(var(--glow-primary) / 0.12);
+  }
+  
+  /* === SURFACE UTILITIES === */
+  .surface-elevated {
+    background-color: hsl(var(--surface-elevated));
+  }
+  
+  .surface-sunken {
+    background-color: hsl(var(--surface-sunken));
+  }
+  
+  /* === TEXT HIERARCHY === */
+  .text-hierarchy-primary {
+    color: hsl(var(--text-primary));
+  }
+  
+  .text-hierarchy-secondary {
+    color: hsl(var(--text-secondary));
+  }
+  
+  .text-hierarchy-tertiary {
+    color: hsl(var(--text-tertiary));
+  }
+
+  /* === SMOOTH TRANSITIONS === */
+  .transition-smooth {
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* === SCROLLBAR (minimal) === */
+@layer base {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.15);
+    border-radius: 3px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.25);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.15) transparent;
+  }
+}
+
+/* === TYPOGRAPHY (premium SaaS hierarchy) === */
+@layer base {
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+    letter-spacing: -0.02em;
+  }
+
+  h1 {
+    @apply text-xl;
+  }
+
+  h2 {
+    @apply text-base;
+  }
+
+  h3 {
+    @apply text-sm;
+  }
+
+  p {
+    @apply leading-relaxed;
+  }
+
+  .prose {
+    @apply leading-7 text-foreground/90;
+  }
+
+  /* Numeric styling for prices/credits */
+  .font-numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
