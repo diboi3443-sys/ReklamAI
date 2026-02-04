@@ -86,16 +86,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.log(`[STATUS] Authenticated user: ${userId}`);
     }
 
-    // Parse generation ID from query or body
+    // Parse generation ID and optional webhook data from query or body
     let generationId: string;
+    let webhookStatus: string | undefined;
+    let webhookOutputUrl: string | undefined;
+    
     if (req.method === 'GET') {
       generationId = url.searchParams.get('generationId') || '';
     } else {
       const body = await req.json();
       generationId = body.generationId || '';
+      webhookStatus = body.status;  // Status from webhook callback
+      webhookOutputUrl = body.outputUrl;  // Output URL from webhook callback
     }
 
     console.log(`[STATUS] Generation ID: ${generationId}`);
+    if (webhookStatus) {
+      console.log(`[STATUS] Webhook status: ${webhookStatus}`);
+    }
+    if (webhookOutputUrl) {
+      console.log(`[STATUS] Webhook outputUrl: ${webhookOutputUrl}`);
+    }
 
     const validationResult = statusSchema.safeParse({ generationId });
     if (!validationResult.success) {
@@ -125,49 +136,85 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Poll provider for status using centralized client
-    // Get model key from generation for logging
+    // Get model key and capabilities from generation for endpoint selection
     let modelKey: string | undefined;
+    let apiFamily: string = 'market';
     if (generation.model_id) {
       const { data: model } = await supabase
         .from('models')
-        .select('key')
+        .select('key, capabilities')
         .eq('id', generation.model_id)
         .single();
       modelKey = model?.key;
+      apiFamily = model?.capabilities?.family || 'market';
     }
 
-    // Safe logging
-    console.log(`[STATUS] Polling provider for task: ${generation.provider_task_id}`);
-    if (modelKey) {
-      console.log(`[STATUS] Model: ${modelKey}`);
-    }
+    // Get correct status endpoint for API family
+    // NOTE: Most special APIs (Flux Kontext, Veo3, etc.) use Market API for status checks
+    // even though they have their own create endpoints. Only use special status endpoints
+    // if they are known to work.
+    const { getKieEndpoints, MARKET_ENDPOINTS } = await import('../_shared/providers/kie-endpoints.ts');
+    
+    // For now, always use Market API for status checks as it's more reliable
+    // Special API endpoints for status often return 404 or require different parameters
+    const statusEndpointPath = MARKET_ENDPOINTS.statusPath;
 
     let providerStatus;
-    try {
-      providerStatus = await kieStatus(generation.provider_task_id, modelKey);
-
-      // Safe logging
-      console.log(`[STATUS] Provider status: ${providerStatus.status}, progress: ${providerStatus.progress || 'N/A'}`);
-
-      // Update provider_tasks record
+    
+    // If webhook provided status and outputUrl, use them directly (bypass polling)
+    if (webhookStatus && (webhookStatus === 'succeeded' || webhookStatus === 'failed')) {
+      console.log(`[STATUS] Using webhook-provided status: ${webhookStatus}`);
+      providerStatus = {
+        status: webhookStatus as 'succeeded' | 'failed',
+        outputUrl: webhookOutputUrl,
+        progress: webhookStatus === 'succeeded' ? 100 : undefined,
+        raw: { source: 'webhook', status: webhookStatus, outputUrl: webhookOutputUrl },
+      };
+      
+      // Update provider_tasks with webhook data
       await supabase
         .from('provider_tasks')
         .update({
-          status: providerStatus.status,
+          status: webhookStatus,
           raw: providerStatus.raw,
           updated_at: new Date().toISOString(),
         })
         .eq('generation_id', generationId);
-    } catch (providerError: any) {
-      console.error('[STATUS] ❌ Provider status error:', providerError);
-      console.error('[STATUS] Provider error message:', providerError?.message);
-      console.error('[STATUS] Provider error stack:', providerError?.stack);
-      // Return current status if provider is unreachable
-      return json({
-        status: generation.status,
-        error: 'Provider unavailable',
-        details: providerError?.message || String(providerError),
-      }, 200);
+    } else {
+      // Poll KIE API for status
+      console.log(`[STATUS] Polling provider for task: ${generation.provider_task_id}`);
+      if (modelKey) {
+        console.log(`[STATUS] Model: ${modelKey}`);
+      }
+      console.log(`[STATUS] API Family: ${apiFamily}`);
+      console.log(`[STATUS] Status endpoint: ${statusEndpointPath}`);
+
+      try {
+        providerStatus = await kieStatus(generation.provider_task_id, modelKey, statusEndpointPath);
+
+        // Safe logging
+        console.log(`[STATUS] Provider status: ${providerStatus.status}, progress: ${providerStatus.progress || 'N/A'}`);
+
+        // Update provider_tasks record
+        await supabase
+          .from('provider_tasks')
+          .update({
+            status: providerStatus.status,
+            raw: providerStatus.raw,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('generation_id', generationId);
+      } catch (providerError: any) {
+        console.error('[STATUS] ❌ Provider status error:', providerError);
+        console.error('[STATUS] Provider error message:', providerError?.message);
+        console.error('[STATUS] Provider error stack:', providerError?.stack);
+        // Return current status if provider is unreachable
+        return json({
+          status: generation.status,
+          error: 'Provider unavailable',
+          details: providerError?.message || String(providerError),
+        }, 200);
+      }
     }
 
     // Map provider status to internal status
@@ -176,8 +223,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.log(`[STATUS] Status check: newStatus='${newStatus}', generation.status='${generation.status}'`);
     console.log(`[STATUS] Condition: newStatus === 'succeeded' = ${newStatus === 'succeeded'}, generation.status !== 'succeeded' = ${generation.status !== 'succeeded'}`);
 
+    // Track update result for debug
+    let updateResult: { success?: boolean; error?: string; rowsAffected?: number; branch?: string } = {};
+
     // Handle status transitions
     if (newStatus === 'succeeded' && generation.status !== 'succeeded') {
+      updateResult.branch = 'succeeded';
       console.log(`[STATUS] ✅ Entering succeeded block - will download and update`);
       console.log(`[STATUS] providerStatus.outputUrl: ${providerStatus.outputUrl || 'NOT PROVIDED'}`);
 
@@ -346,6 +397,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
       }
     } else if (newStatus === 'failed' && generation.status !== 'failed') {
+      updateResult.branch = 'failed';
       // Refund credits
       const ownerId = userId || generation.owner_id;
       await refundCredits(ownerId, generationId, {
@@ -362,14 +414,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
         })
         .eq('id', generationId);
     } else if (newStatus !== generation.status && newStatus !== 'succeeded' && newStatus !== 'failed') {
-      // Update status for queued/processing
-      await supabase
-        .from('generations')
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', generationId);
+      updateResult.branch = 'processing';
+      // For 'processing' status, don't update DB (constraint may not allow it)
+      // Instead, just track in provider_tasks and return in API response
+      console.log(`[STATUS] Provider status is '${newStatus}', keeping DB status as '${generation.status}'`);
+      console.log(`[STATUS] Note: DB constraint may not allow 'processing' status`);
+      updateResult = { ...updateResult, success: true, rowsAffected: 0, error: 'Skipped - DB constraint' };
+      // Don't update generation.status - let the API return the real provider status
+    } else {
+      updateResult.branch = 'no_update';
+      console.log(`[STATUS] No status update needed (condition not met)`);
+      console.log(`[STATUS]   newStatus='${newStatus}', generation.status='${generation.status}'`);
+      console.log(`[STATUS]   newStatus !== generation.status: ${newStatus !== generation.status}`);
+      console.log(`[STATUS]   newStatus !== 'succeeded': ${newStatus !== 'succeeded'}`);
+      console.log(`[STATUS]   newStatus !== 'failed': ${newStatus !== 'failed'}`);
     }
 
     // Get updated generation
@@ -397,8 +455,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
+    // Debug: log final status comparison
+    console.log(`[STATUS] Final response: updatedGen.status='${updatedGeneration?.status}', newStatus='${newStatus}'`);
+    
+    // Check which branch was entered
+    const conditionMet = newStatus !== generation.status && newStatus !== 'succeeded' && newStatus !== 'failed';
+    
+    // Use provider status for the response (more accurate than DB status which may be stale)
+    // DB status is only updated on final states (succeeded, failed)
+    const finalStatus = (newStatus === 'succeeded' || newStatus === 'failed') 
+      ? (updatedGeneration?.status || newStatus)
+      : newStatus;
+    
     return json({
-      status: updatedGeneration?.status || newStatus,
+      status: finalStatus,
       progress: providerStatus.progress,
       signedPreviewUrl,
       error: updatedGeneration?.error || providerStatus.error,

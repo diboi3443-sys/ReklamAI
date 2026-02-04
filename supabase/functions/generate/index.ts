@@ -385,6 +385,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     let providerResult;
     try {
+      // Check if model requires callback (e.g., Flux Kontext)
+      const requiresCallback = capabilities.requires_callback === true;
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+      const callBackUrl = requiresCallback ? `${supabaseUrl}/functions/v1/provider-webhook` : undefined;
+      
+      if (requiresCallback) {
+        console.log(`[GENERATE] Model requires callback, using callBackUrl: ${callBackUrl}`);
+      }
+
       const providerPayload: ProviderGeneratePayload = {
         modelKey: modelIdentifier, // Use model_identifier from DB (exact KIE identifier)
         prompt,
@@ -396,6 +405,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         // Pass endpoint config for different API families
         endpointPath: endpoints.createPath,
         apiFamily: apiFamily as any,
+        // Add callback URL for models that require it
+        callBackUrl,
       };
 
       providerResult = await kieGenerate(providerPayload);

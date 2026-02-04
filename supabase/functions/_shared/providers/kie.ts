@@ -52,6 +52,12 @@ export async function kieGenerate(
     console.log(`[KIE] Using custom endpoint: ${endpointPath}`);
   }
 
+  // Get callback URL if provided (for models that require webhook notification)
+  const callBackUrl = (payload as any).callBackUrl;
+  if (callBackUrl) {
+    console.log(`[KIE] Using callback URL: ${callBackUrl}`);
+  }
+
   // Build payload dynamically
   const requestPayload = buildKiePayload(
     kieModelName,
@@ -65,6 +71,11 @@ export async function kieGenerate(
       params: payload.input?.params,
     }
   );
+
+  // Add callback URL to request payload if provided
+  if (callBackUrl) {
+    requestPayload.callBackUrl = callBackUrl;
+  }
 
   try {
     const result = await client.createTask(kieModelName, requestPayload, endpointPath);

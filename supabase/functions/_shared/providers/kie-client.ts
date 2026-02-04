@@ -116,9 +116,6 @@ export class KieClient {
     const createPath = endpointPath || '/api/v1/jobs/createTask';
     const url = `${this.baseUrl}${createPath}`;
 
-    // Build request body for KIE Market API
-    // Structure: { model: "...", input: { prompt, ...other fields } }
-    // KIE Market API requires 'model' at top level and 'input' field (cannot be null)
     // Check if payload already contains model field (avoid duplication)
     const hasModelField = payload.model || payload.modelName || payload.model_name || payload.model_id;
     const modelValue = hasModelField
@@ -130,25 +127,81 @@ export class KieClient {
       throw new Error('KIE API error: Model name is required and cannot be empty');
     }
 
-    // KIE Market API structure: model at top level, input contains prompt and other fields
-    const requestBody: Record<string, any> = {
-      model: modelValue,
-      input: {
+    // Detect API family from endpoint path
+    const isFluxKontext = createPath.includes('/flux/kontext');
+    const isVeo3 = createPath.includes('/veo/');
+    const is4oImage = createPath.includes('/gpt4o-image/');
+    const isRunway = createPath.includes('/runway/');
+    const isLuma = createPath.includes('/modify/');
+    const isSuno = createPath === '/api/v1/generate' || createPath.includes('/generate') && !createPath.includes('/veo/') && !createPath.includes('/runway/') && !createPath.includes('/gpt4o-image/') && !createPath.includes('/modify/') && !createPath.includes('/flux/');
+    const isSpecialApi = isFluxKontext || isVeo3 || is4oImage || isRunway || isLuma || isSuno;
+
+    let requestBody: Record<string, any>;
+
+    if (isSpecialApi) {
+      // Special APIs (Flux Kontext, Veo3, 4o-image, Runway, Luma, Suno)
+      // Structure: { model: "...", prompt: "...", callBackUrl: "...", ...other fields at top level }
+      // Note: Suno uses model from payload (already set by payload-builder in correct format)
+      requestBody = {
+        ...(isSuno ? {} : { model: modelValue }), // Suno model is set in payload-builder
         prompt: payload.prompt || '',
+        ...(payload.callBackUrl && { callBackUrl: payload.callBackUrl }),
         ...(payload.image && { image: payload.image }),
         ...(payload.reference_image && { reference_image: payload.reference_image }),
+        ...(payload.input_image && { input_image: payload.input_image }),
         ...(payload.video && { video: payload.video }),
         ...(payload.start_frame && { start_frame: payload.start_frame }),
         ...(payload.end_frame && { end_frame: payload.end_frame }),
         ...(payload.audio && { audio: payload.audio }),
-        // Include any other fields from payload (except prompt, model fields)
+        ...(payload.seed && { seed: payload.seed }),
+        ...(payload.aspect_ratio && { aspect_ratio: payload.aspect_ratio }),
+        ...(payload.duration && { duration: payload.duration }),
+        ...(payload.ratio && { ratio: payload.ratio }),
+        // Suno-specific fields
+        ...(payload.instrumental !== undefined && { instrumental: payload.instrumental }),
+        ...(payload.gpt_description_prompt && { gpt_description_prompt: payload.gpt_description_prompt }),
+        // 4o Image fields
+        ...(payload.fileUrl && { fileUrl: payload.fileUrl }),
+        // Luma fields
+        ...(payload.imageUrl && { imageUrl: payload.imageUrl }),
+        ...(payload.videoUrl && { videoUrl: payload.videoUrl }),
+        // Include model from payload if present (for Suno, it's already in correct format)
+        ...(payload.model && { model: payload.model }),
+        // Include any other fields from payload (except already handled)
         ...Object.fromEntries(
           Object.entries(payload).filter(([key]) =>
-            !['prompt', 'model', 'modelName', 'model_name', 'model_id', 'image', 'reference_image', 'video', 'start_frame', 'end_frame', 'audio'].includes(key)
+            !['prompt', 'model', 'modelName', 'model_name', 'model_id', 'callBackUrl', 'image', 'input_image', 'reference_image', 'video', 'start_frame', 'end_frame', 'audio', 'seed', 'aspect_ratio', 'duration', 'ratio', 'gpt_description_prompt', 'make_instrumental', 'instrumental', 'fileUrl', 'imageUrl', 'videoUrl', 'customMode'].includes(key)
           )
         ),
-      },
-    };
+      };
+      console.log(`[KIE] Using SPECIAL API format (flat structure) for: ${createPath}`);
+      if (payload.callBackUrl) {
+        console.log(`[KIE] Including callBackUrl in request: ${payload.callBackUrl}`);
+      }
+    } else {
+      // Market API (default)
+      // Structure: { model: "...", callBackUrl?: "...", input: { prompt, ...other fields } }
+      requestBody = {
+        model: modelValue,
+        ...(payload.callBackUrl && { callBackUrl: payload.callBackUrl }),
+        input: {
+          prompt: payload.prompt || '',
+          ...(payload.image && { image: payload.image }),
+          ...(payload.reference_image && { reference_image: payload.reference_image }),
+          ...(payload.video && { video: payload.video }),
+          ...(payload.start_frame && { start_frame: payload.start_frame }),
+          ...(payload.end_frame && { end_frame: payload.end_frame }),
+          ...(payload.audio && { audio: payload.audio }),
+          // Include any other fields from payload (except prompt, model fields)
+          ...Object.fromEntries(
+            Object.entries(payload).filter(([key]) =>
+              !['prompt', 'model', 'modelName', 'model_name', 'model_id', 'image', 'reference_image', 'video', 'start_frame', 'end_frame', 'audio'].includes(key)
+            )
+          ),
+        },
+      };
+      console.log(`[KIE] Using MARKET API format (nested input) for: ${createPath}`);
+    }
 
     // Safe logging (never log API key)
     console.log(`[KIE] ===== CREATE TASK REQUEST =====`);
@@ -332,13 +385,40 @@ export class KieClient {
     error?: string;
     raw: KieTaskResponse;
   }> {
-    // Use provided endpoint path or default to Market API
+    // Use provided statusEndpointPath or default to Market API
     const statusPath = statusEndpointPath || '/api/v1/jobs/recordInfo';
-    const url = `${this.baseUrl}${statusPath}?taskId=${encodeURIComponent(taskId)}`;
+    
+    // Detect API type from endpoint path to determine method and URL format
+    const isVeo3 = statusPath.includes('/veo/');
+    const isRunway = statusPath.includes('/runway/');
+    const isLuma = statusPath.includes('/modify/');
+    const is4oImage = statusPath.includes('/gpt4o-image/');
+    const isSuno = statusPath.includes('/generate/record-info') || statusPath === '/api/v1/generate';
+    const isFluxKontext = statusPath.includes('/flux/kontext/');
+    const isSpecialApi = isVeo3 || isRunway || isLuma || is4oImage || isSuno || isFluxKontext;
+    
+    // Build URL based on API type
+    let url: string;
+    let usePostMethod = false;
+    
+    if (isSpecialApi) {
+      // Special APIs use query parameter for taskId
+      url = `${this.baseUrl}${statusPath}?taskId=${encodeURIComponent(taskId)}`;
+      // Flux Kontext uses POST with body
+      if (isFluxKontext) {
+        usePostMethod = true;
+        url = `${this.baseUrl}${statusPath}`;
+      }
+      console.log(`[KIE] Using special API endpoint: ${statusPath}`);
+    } else {
+      // Market API
+      url = `${this.baseUrl}${statusPath}?taskId=${encodeURIComponent(taskId)}`;
+    }
 
     // Safe logging
       console.log(`[KIE] ===== GET TASK STATUS =====`);
       console.log(`[KIE] Task ID: ${taskId}`);
+      console.log(`[KIE] Method: ${usePostMethod ? 'POST' : 'GET'}`);
       if (modelKey) {
         console.log(`[KIE] Model: ${modelKey}`);
       }
@@ -349,47 +429,103 @@ export class KieClient {
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
     try {
-      const response = await fetch(url, {
-        method: 'GET',
+      // Use POST with body for special APIs, GET with query params for Market API
+      const fetchOptions: RequestInit = {
+        method: usePostMethod ? 'POST' : 'GET',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
+          ...(usePostMethod && { 'Content-Type': 'application/json' }),
         },
         signal: controller.signal,
-      });
+      };
+      
+      if (usePostMethod) {
+        // For Flux Kontext, use taskId in body (may need to strip prefix)
+        const taskIdForBody = taskId.replace('fluxkontext_', '');
+        fetchOptions.body = JSON.stringify({ taskId: taskIdForBody });
+        console.log(`[KIE] POST body: ${JSON.stringify({ taskId: taskIdForBody })}`);
+      }
+      
+      const response = await fetch(url, fetchOptions);
 
       clearTimeout(timeoutId);
 
       console.log(`[KIE] Response status: ${response.status}`);
 
-      if (!response.ok) {
-        let errorData: any;
-        const contentType = response.headers.get('content-type') || '';
-        const isJson = contentType.includes('application/json');
-
-        try {
-          if (isJson) {
-            errorData = await response.json();
-          } else {
-            const errorText = await response.text();
-            const isHtml = errorText.trim().startsWith('<!DOCTYPE') || errorText.trim().startsWith('<html');
-
-            if (isHtml) {
-              console.error(`[KIE] API error: ${response.status} (HTML response - likely wrong endpoint)`);
-              throw new Error(`KIE API returned HTML (likely wrong endpoint): ${response.status}`);
+      // Parse response body (we need to handle 422 as potential "still processing" for special APIs)
+      const contentType = response.headers.get('content-type') || '';
+      const isJson = contentType.includes('application/json');
+      
+      let data: any;
+      if (isJson) {
+        data = await response.json();
+      } else {
+        const textBody = await response.text();
+        data = { message: textBody.substring(0, 200) };
+      }
+      
+      // Handle "recordInfo is null" response for special API tasks (Flux Kontext, Veo3, etc.)
+      // This happens when the task is still being processed by the special API
+      // Note: KIE returns HTTP 200 with code: 422 in body for this case
+      if ((data.code === 422 || response.status === 422) && 
+          (data.msg === 'recordInfo is null' || data.data === null)) {
+        console.log(`[KIE] Task ${taskId} not in Market API, trying special API endpoint...`);
+        
+        // For Flux Kontext tasks, try the dedicated status endpoint
+        if (isFluxKontext) {
+          try {
+            const fluxStatusUrl = `${this.baseUrl}/api/v1/flux/kontext/getImageDetails`;
+            console.log(`[KIE] Trying Flux Kontext status endpoint: ${fluxStatusUrl}`);
+            
+            // Try POST with taskId in body
+            const fluxResponse = await fetch(fluxStatusUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ taskId }),
+            });
+            
+            console.log(`[KIE] Flux status response: ${fluxResponse.status}`);
+            const fluxData = await fluxResponse.json();
+            console.log(`[KIE] Flux status data:`, JSON.stringify(fluxData));
+            
+            // Check if we got a valid response
+            if (fluxResponse.ok && fluxData.data) {
+              const taskData = fluxData.data;
+              const state = taskData.state || taskData.status || 'processing';
+              const outputUrl = taskData.resultUrl || taskData.outputUrl || taskData.url;
+              
+              console.log(`[KIE] Flux task state from dedicated endpoint: ${state}`);
+              
+              return {
+                status: this.mapStatus(state),
+                progress: taskData.progress || (state === 'succeeded' ? 100 : 50),
+                outputUrl,
+                raw: fluxData,
+              };
             }
-
-            errorData = { message: errorText.substring(0, 200) };
+          } catch (fluxError: any) {
+            console.log(`[KIE] Flux status endpoint failed: ${fluxError.message}`);
           }
-        } catch (parseError) {
-          errorData = { message: `HTTP ${response.status}` };
         }
+        
+        // Fallback to processing status
+        console.log(`[KIE] Task ${taskId} still processing in special API`);
+        return {
+          status: 'processing',
+          progress: 50, // Estimate - task is being processed
+          raw: data,
+        };
+      }
 
-        const errorMsg = errorData.msg || errorData.message || errorData.error || `HTTP ${response.status}`;
+      // Handle other non-OK responses as errors
+      if (!response.ok && response.status !== 200) {
+        const errorMsg = data.msg || data.message || data.error || `HTTP ${response.status}`;
         console.error(`[KIE] API error: ${response.status} - ${errorMsg}`);
         throw new Error(`KIE API error: ${response.status} - ${errorMsg}`);
       }
-
-      const data: any = await response.json();
 
       // KIE Market API returns { code: 200, data: { state: "...", resultJson: "..." } }
       const taskData = data.data || data;

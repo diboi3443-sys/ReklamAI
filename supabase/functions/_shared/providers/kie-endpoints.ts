@@ -31,47 +31,50 @@ export const MARKET_ENDPOINTS: KieEndpointConfig = {
 /**
  * Veo 3 API endpoints
  * Docs: https://docs.kie.ai/veo3-api/quickstart
+ * Correct endpoints: /api/v1/veo/generate, /api/v1/veo/record-info
  */
 export const VEO3_ENDPOINTS: KieEndpointConfig = {
   family: 'veo3',
   createPath: '/api/v1/veo/generate',
-  statusPath: '/api/v1/veo/getDetails',
-  downloadPath: '/api/v1/veo/get1080pVideo',
+  statusPath: '/api/v1/veo/record-info',
   callbackPath: '/api/v1/veo/callbacks',
 };
 
 /**
  * 4o Image API endpoints
  * Docs: https://docs.kie.ai/4o-image-api/quickstart
+ * Correct endpoints: /api/v1/gpt4o-image/generate, /api/v1/gpt4o-image/download-url
  */
 export const FOUR_O_IMAGE_ENDPOINTS: KieEndpointConfig = {
   family: '4o-image',
-  createPath: '/api/v1/4o-image/generate',
-  statusPath: '/api/v1/4o-image/getDetails',
-  downloadPath: '/api/v1/4o-image/getDownloadUrl',
-  callbackPath: '/api/v1/4o-image/callbacks',
+  createPath: '/api/v1/gpt4o-image/generate',
+  statusPath: '/api/v1/gpt4o-image/record-info',
+  downloadPath: '/api/v1/gpt4o-image/download-url',
+  callbackPath: '/api/v1/gpt4o-image/callbacks',
 };
 
 /**
  * Runway API endpoints
  * Docs: https://docs.kie.ai/runway-api/quickstart
+ * Correct endpoints: /api/v1/runway/generate, /api/v1/runway/record-info
  */
 export const RUNWAY_ENDPOINTS: KieEndpointConfig = {
   family: 'runway',
   createPath: '/api/v1/runway/generate',
-  statusPath: '/api/v1/runway/getDetails',
+  statusPath: '/api/v1/runway/record-info',
   callbackPath: '/api/v1/runway/callbacks',
 };
 
 /**
  * Luma API endpoints
  * Docs: https://docs.kie.ai/luma-api/quickstart
+ * Correct endpoints: /api/v1/modify/generate (NOT /api/v1/luma/generate)
  */
 export const LUMA_ENDPOINTS: KieEndpointConfig = {
   family: 'luma',
-  createPath: '/api/v1/luma/generate',
-  statusPath: '/api/v1/luma/getDetails',
-  callbackPath: '/api/v1/luma/callbacks',
+  createPath: '/api/v1/modify/generate',
+  statusPath: '/api/v1/modify/record-info',
+  callbackPath: '/api/v1/modify/callbacks',
 };
 
 /**
@@ -90,12 +93,13 @@ export const FLUX_KONTEXT_ENDPOINTS: KieEndpointConfig = {
  * Suno Music API endpoints
  * Docs: https://docs.kie.ai/suno-api/quickstart
  * Models: chirp-v3-5, chirp-v4
+ * IMPORTANT: Suno uses /api/v1/generate (NOT /api/v1/suno/generate)
  */
 export const SUNO_ENDPOINTS: KieEndpointConfig = {
   family: 'suno',
-  createPath: '/api/v1/suno/generate',
-  statusPath: '/api/v1/suno/getDetails',
-  callbackPath: '/api/v1/suno/callbacks',
+  createPath: '/api/v1/generate',
+  statusPath: '/api/v1/generate/record-info',
+  callbackPath: '/api/v1/generate/callbacks',
 };
 
 /**
