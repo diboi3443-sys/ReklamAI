@@ -641,12 +641,14 @@ export default function LibraryPage() {
       }
 
       // Load generations
+      // Note: Must use explicit foreign key syntax: table_name!foreign_key_column(...)
+      // because preset_id != presets and model_id != models
       const { data: generations, error: genError } = await supabase
         .from('generations')
         .select(`
           *,
-          presets(title_ru, title_en, type, key),
-          models(title, provider, key),
+          presets!preset_id(title_ru, title_en, type, key),
+          models!model_id(title, provider, key),
           assets(kind, storage_path, storage_bucket)
         `)
         .eq('owner_id', user.id)

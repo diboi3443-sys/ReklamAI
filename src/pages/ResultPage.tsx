@@ -67,8 +67,8 @@ export default function ResultPage() {
           .from("generations")
           .select(`
             *,
-            presets(title_ru, title_en, type, key),
-            models(title, key, provider)
+            presets!preset_id(title_ru, title_en, type, key),
+            models!model_id(title, key, provider)
           `)
           .eq("id", id)
           .eq("owner_id", user.id)
