@@ -1,7 +1,18 @@
 // Edge Functions API client wrapper
 import { getAuthToken, supabase } from './supabase';
 
-const EDGE_FUNCTIONS_URL = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, '') || '';
+// Support both Vite env vars and window.APP_CONFIG
+const getSupabaseUrl = (): string => {
+  if (import.meta.env.VITE_SUPABASE_URL) {
+    return import.meta.env.VITE_SUPABASE_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && (window as any).APP_CONFIG?.VITE_SUPABASE_URL) {
+    return (window as any).APP_CONFIG.VITE_SUPABASE_URL.replace(/\/$/, '');
+  }
+  return '';
+};
+
+const EDGE_FUNCTIONS_URL = getSupabaseUrl();
 const EDGE_FUNCTIONS_BASE = `${EDGE_FUNCTIONS_URL}/functions/v1`;
 
 export interface UploadFileParams {

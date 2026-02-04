@@ -1,8 +1,21 @@
 // Supabase client for frontend
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Support both Vite env vars and window.APP_CONFIG (for reg.ru hosting)
+const getEnvVar = (key: string): string => {
+  // First try Vite env vars (for Vercel, ISPmanager with env vars)
+  if (import.meta.env[key]) {
+    return import.meta.env[key];
+  }
+  // Fallback to window.APP_CONFIG (for reg.ru without env vars)
+  if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
+    return (window as any).APP_CONFIG[key] || '';
+  }
+  return '';
+};
+
+const supabaseUrl = getEnvVar('VITE_SUPABASE_URL') || '';
+const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || '';
 
 // Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
