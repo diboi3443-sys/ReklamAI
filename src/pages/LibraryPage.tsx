@@ -650,7 +650,8 @@ export default function LibraryPage() {
           assets(kind, storage_path, storage_bucket)
         `)
         .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       // Load boards
       const { data: boardsData } = await supabase
@@ -1042,7 +1043,7 @@ export default function LibraryPage() {
                     {board.thumbnail ? (
                       <img
                         src={board.thumbnail}
-                        alt={board.name}
+                        alt={board.title}
                         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                       />
                     ) : (
@@ -1052,7 +1053,7 @@ export default function LibraryPage() {
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                     <div className="absolute bottom-2 left-2 right-2">
-                      <h3 className="font-medium text-white truncate">{board.title || board.name}</h3>
+                      <h3 className="font-medium text-white truncate">{board.title}</h3>
                     </div>
                   </div>
                   <CardContent className="p-3">

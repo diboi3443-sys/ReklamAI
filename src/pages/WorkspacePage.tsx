@@ -269,7 +269,17 @@ export default function WorkspacePage() {
       console.error('[WorkspacePage] Generation error:', error);
       setCanvasState("empty");
       setProgress(0);
-      // Could show toast here
+      
+      // Show user-friendly error message
+      let errorMessage = 'Произошла ошибка при генерации';
+      if (error.code === 402 || error.type === 'insufficient_credits') {
+        errorMessage = 'Недостаточно кредитов для генерации. Пожалуйста, пополните баланс.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      // You can add toast notification here
+      alert(errorMessage);
     }
   };
 

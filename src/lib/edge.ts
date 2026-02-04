@@ -152,6 +152,13 @@ export async function generate(params: GenerateParams): Promise<GenerateResponse
   const data = await response.json();
 
   if (!response.ok) {
+    // Handle 402 Payment Required (Insufficient credits)
+    if (response.status === 402) {
+      const error = new Error(data.error || data.message || 'Insufficient credits');
+      (error as any).code = 402;
+      (error as any).type = 'insufficient_credits';
+      throw error;
+    }
     // Handle structured 422 error from KIE
     if (response.status === 422 && data.code === 422 && data.provider === 'kie') {
       const error = new Error(data.message || 'Model not supported');
