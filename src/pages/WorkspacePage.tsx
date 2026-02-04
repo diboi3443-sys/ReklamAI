@@ -210,7 +210,7 @@ export default function WorkspacePage() {
 
       // Poll for status
       let attempts = 0;
-      const maxAttempts = 120; // 2 minutes max
+      const maxAttempts = 300; // 5 minutes max for video generation
       
       while (attempts < maxAttempts) {
         const statusResult = await getStatus(generateResult.generationId);
@@ -274,6 +274,13 @@ export default function WorkspacePage() {
       let errorMessage = 'Произошла ошибка при генерации';
       if (error.code === 402 || error.type === 'insufficient_credits') {
         errorMessage = 'Недостаточно кредитов для генерации. Пожалуйста, пополните баланс.';
+      } else if (error.code === 502 || error.type === 'provider_error') {
+        errorMessage = 'Ошибка провайдера. Пожалуйста, попробуйте еще раз через несколько секунд.';
+        if (error.hint) {
+          errorMessage += `\n\nПодсказка: ${error.hint}`;
+        }
+      } else if (error.code === 504 || error.type === 'timeout') {
+        errorMessage = 'Генерация заняла слишком много времени. Пожалуйста, попробуйте еще раз.';
       } else if (error.message) {
         errorMessage = error.message;
       }

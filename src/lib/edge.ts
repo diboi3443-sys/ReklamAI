@@ -159,6 +159,18 @@ export async function generate(params: GenerateParams): Promise<GenerateResponse
       (error as any).type = 'insufficient_credits';
       throw error;
     }
+    // Handle 502 Bad Gateway (Provider error or timeout)
+    if (response.status === 502 || response.status === 504) {
+      const error = new Error(
+        data.error || data.message || 
+        (response.status === 504 ? 'Generation timeout - please try again' : 'Provider error - please try again later')
+      );
+      (error as any).code = response.status;
+      (error as any).type = response.status === 504 ? 'timeout' : 'provider_error';
+      (error as any).provider = data.provider;
+      (error as any).hint = data.hint;
+      throw error;
+    }
     // Handle structured 422 error from KIE
     if (response.status === 422 && data.code === 422 && data.provider === 'kie') {
       const error = new Error(data.message || 'Model not supported');

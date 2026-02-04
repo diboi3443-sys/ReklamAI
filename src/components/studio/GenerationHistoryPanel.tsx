@@ -51,6 +51,39 @@ interface HistoryItem {
   createdAt: Date;
 }
 
+// Supabase data types
+interface GenerationAsset {
+  kind: string;
+  storage_path: string;
+  storage_bucket: string;
+}
+
+interface GenerationPreset {
+  title_ru?: string;
+  title_en?: string;
+  type?: string;
+}
+
+interface GenerationModel {
+  title?: string;
+  provider?: string;
+  key?: string;
+}
+
+interface GenerationRecord {
+  id: string;
+  status: string;
+  modality: string;
+  prompt: string;
+  progress?: number;
+  final_credits?: number;
+  estimated_credits?: number;
+  created_at: string;
+  presets?: GenerationPreset;
+  models?: GenerationModel;
+  assets?: GenerationAsset[];
+}
+
 const mockHistoryData: HistoryItem[] = [
   {
     id: "gen-001",
@@ -194,8 +227,8 @@ export function GenerationHistoryPanel({
         .from('generations')
         .select(`
           *,
-          presets:preset_id(title_ru, title_en, type),
-          models:model_id(title, provider, key),
+          presets!preset_id(title_ru, title_en, type),
+          models!model_id(title, provider, key),
           assets(kind, storage_path, storage_bucket)
         `)
         .eq('owner_id', user.id)
@@ -203,11 +236,12 @@ export function GenerationHistoryPanel({
         .limit(20);
 
       if (!error && data) {
+        const records = data as GenerationRecord[];
         // Find current processing job
-        const processing = data.find((g: any) => g.status === 'queued' || g.status === 'processing');
+        const processing = records.find((g) => g.status === 'queued' || g.status === 'processing');
         if (processing) {
           // Get thumbnail from assets or generate placeholder
-          const outputAsset = processing.assets?.find((a: any) => a.kind === 'output');
+          const outputAsset = processing.assets?.find((a) => a.kind === 'output');
           let thumbnail = '';
           if (outputAsset) {
             const { data: signedUrl } = await supabase.storage
@@ -232,8 +266,8 @@ export function GenerationHistoryPanel({
         }
 
         // Convert to history items
-        const items: HistoryItem[] = data.slice(0, 10).map((g: any) => {
-          const outputAsset = g.assets?.find((a: any) => a.kind === 'output');
+        const items: HistoryItem[] = records.slice(0, 10).map((g) => {
+          const outputAsset = g.assets?.find((a) => a.kind === 'output');
           return {
             id: g.id,
             type: g.modality === 'video' ? 'video' : 'image',
@@ -253,9 +287,9 @@ export function GenerationHistoryPanel({
         for (const item of items) {
           if (item.thumbnail.startsWith('placeholder-')) {
             const genId = item.thumbnail.replace('placeholder-', '');
-            const gen = data.find((g: any) => g.id === genId);
+            const gen = records.find((g) => g.id === genId);
             if (gen) {
-              const outputAsset = gen.assets?.find((a: any) => a.kind === 'output');
+              const outputAsset = gen.assets?.find((a) => a.kind === 'output');
               if (outputAsset) {
                 const { data: signedUrl } = await supabase.storage
                   .from(outputAsset.storage_bucket)

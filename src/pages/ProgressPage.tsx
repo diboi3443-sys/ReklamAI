@@ -249,8 +249,8 @@ export default function ProgressPage() {
         .from('generations')
         .select(`
           *,
-          presets:preset_id(title_ru, title_en, type),
-          models:model_id(title, provider, key)
+          presets!preset_id(title_ru, title_en, type),
+          models!model_id(title, provider, key)
         `)
         .eq('owner_id', user.id)
         .in('status', ['queued', 'processing'])
@@ -319,8 +319,8 @@ export default function ProgressPage() {
           .from('generations')
           .select(`
             *,
-            presets:preset_id(title_ru, title_en, type),
-            models:model_id(title, provider, key)
+            presets!preset_id(title_ru, title_en, type),
+            models!model_id(title, provider, key)
           `)
           .eq('id', location.state.generationId)
           .eq('owner_id', user.id)
