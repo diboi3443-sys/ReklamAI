@@ -227,8 +227,8 @@ export function GenerationHistoryPanel({
         .from('generations')
         .select(`
           *,
-          presets!preset_id(title_ru, title_en, type),
-          models!model_id(title, provider, key),
+          presets(title_ru, title_en, type),
+          models(title, provider, key),
           assets(kind, storage_path, storage_bucket)
         `)
         .eq('owner_id', user.id)
