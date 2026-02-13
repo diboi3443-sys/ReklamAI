@@ -213,7 +213,7 @@ export default function WorkspacePage() {
       setProgress(10);
 
       // Determine preset key based on mode
-      const presetKey = selectedMode === 'video' ? 'text-to-video' : 'text-to-image';
+      const presetKey = selectedMode === 'video' ? 'video-gen' : 'image-gen';
 
       // Call generate API
       console.log('[WorkspacePage] Calling generate API...');

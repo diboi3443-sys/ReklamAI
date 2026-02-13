@@ -33,7 +33,7 @@ export async function loadModels(filter?: ModelFilter): Promise<DatabaseModel[]>
       id: m.id,
       provider: 'kie', // default — extend when backend exposes provider
       key: m.slug,
-      modality: (m.category as any) || 'image',
+      modality: (m.category === 'voice' ? 'audio' : m.category as any) || 'image',
       title: m.name,
       capabilities: {},
       price_multiplier: m.price_multiplier,

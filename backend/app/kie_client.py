@@ -30,7 +30,7 @@ class KIEClient:
         input_image_url: str = "",
         reference_image_url: str = "",
         webhook_url: str = "",
-        extra_params: dict = {},
+        extra_params: dict | None = None,
     ) -> dict:
         """
         Отправляет задачу на генерацию в KIE.ai.
@@ -45,7 +45,7 @@ class KIEClient:
                 "duration": str(duration),
                 "image_url": input_image_url,
                 "image_reference_url": reference_image_url,
-                **extra_params,
+                **(extra_params or {}),
             },
         }
 

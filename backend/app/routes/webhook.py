@@ -2,18 +2,35 @@
 ReklamAI v2.0 — Webhook Routes
 Receives callbacks from KIE.ai when a generation is complete.
 """
+import hashlib
+import hmac
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, timezone
 
 import logging
 
+from app.config import get_settings
 from app.database import async_session
 from app.models import Generation, CreditAccount, CreditTransaction
 
 logger = logging.getLogger("uvicorn")
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+_settings = get_settings()
+
+
+def _verify_webhook_signature(body_bytes: bytes, signature: str | None) -> bool:
+    """Verify HMAC-SHA256 webhook signature if a secret is configured."""
+    secret = _settings.webhook_secret
+    if not secret:
+        # No secret configured — skip verification (dev mode)
+        return True
+    if not signature:
+        return False
+    expected = hmac.new(secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
 
 
 @router.post("/kie")
@@ -22,8 +39,16 @@ async def kie_webhook(request: Request):
     Вебхук от KIE.ai — вызывается когда генерация завершена.
     Обновляет статус генерации и финализирует кредиты.
     """
+    body_bytes = await request.body()
+
+    # Verify webhook signature (if WEBHOOK_SECRET is set)
+    signature = request.headers.get("X-Webhook-Signature")
+    if not _verify_webhook_signature(body_bytes, signature):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
     try:
-        body = await request.json()
+        import json
+        body = json.loads(body_bytes)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
@@ -49,7 +74,7 @@ async def kie_webhook(request: Request):
             return {"ok": False, "reason": "generation_not_found"}
 
         # Update generation
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if status == "completed" or status == "succeeded":
             gen.status = "succeeded"

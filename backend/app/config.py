@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: str = "change-me-in-production"
 
+    # ── CORS ──
+    # Comma-separated list of allowed origins, or "*" for dev
+    cors_origins: str = "http://localhost:8080,http://localhost:3000"
+
     # ── Database ──
     database_url: str = "postgresql+asyncpg://reklamai_user:reklamai_password@db:5432/reklamai_db"
 
@@ -29,9 +33,8 @@ class Settings(BaseSettings):
     kie_api_key: str = ""
     kie_base_url: str = "https://api.kie.ai"
 
-    # ── Supabase (Legacy, for migration period) ──
-    supabase_url: str = ""
-    supabase_service_role_key: str = ""
+    # ── Webhook ──
+    webhook_secret: str = ""  # Shared secret for webhook signature verification
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

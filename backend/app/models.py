@@ -3,13 +3,17 @@ ReklamAI v2.0 — Database Models (SQLAlchemy ORM)
 Works with both PostgreSQL and SQLite.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Text,
     ForeignKey, JSON
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 
 # Use String(36) for UUIDs — works on both SQLite and PostgreSQL
@@ -35,8 +39,8 @@ class User(Base):
     avatar_url = Column(Text, default="")
     role = Column(String(20), default="user")  # user | admin
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # Relations
     credit_account = relationship("CreditAccount", back_populates="user", uselist=False)
@@ -55,8 +59,8 @@ class CreditAccount(Base):
     balance = Column(Float, default=0.0)
     total_earned = Column(Float, default=0.0)
     total_spent = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # Relations
     user = relationship("User", back_populates="credit_account")
@@ -74,8 +78,8 @@ class CreditTransaction(Base):
     amount = Column(Float, nullable=False)  # positive = credit, negative = debit
     type = Column(String(30), nullable=False)  # reserve | finalize | refund | topup
     generation_id = Column(GUID, ForeignKey("generations.id"), nullable=True)
-    meta = Column(JSON, default={})
-    created_at = Column(DateTime, default=datetime.utcnow)
+    meta = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=_utcnow)
 
     # Relations
     account = relationship("CreditAccount", back_populates="transactions")
@@ -95,8 +99,8 @@ class AIModel(Base):
     category = Column(String(50), default="image")  # image | video | voice | text
     is_active = Column(Boolean, default=True)
     price_multiplier = Column(Float, default=1.0)
-    config = Column(JSON, default={})
-    created_at = Column(DateTime, default=datetime.utcnow)
+    config = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=_utcnow)
 
     # Relations
     generations = relationship("Generation", back_populates="model")
@@ -113,9 +117,9 @@ class Preset(Base):
     slug = Column(String(100), unique=True, nullable=False, index=True)
     category = Column(String(50), default="image")
     description = Column(Text, default="")
-    defaults = Column(JSON, default={})  # { credits, aspect_ratio, duration, ... }
+    defaults = Column(JSON, default=dict)  # { credits, aspect_ratio, duration, ... }
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -129,8 +133,8 @@ class Board(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, default="")
     is_pinned = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # Relations
     owner = relationship("User", back_populates="boards")
@@ -155,7 +159,7 @@ class Generation(Base):
     duration = Column(Integer, default=10)
     input_image_url = Column(Text, default="")
     reference_image_url = Column(Text, default="")
-    params = Column(JSON, default={})  # extra params (seed, strength, etc.)
+    params = Column(JSON, default=dict)  # extra params (seed, strength, etc.)
 
     # Status
     status = Column(String(30), default="queued", index=True)
@@ -164,20 +168,20 @@ class Generation(Base):
 
     # Result
     result_url = Column(Text, default="")
-    result_urls = Column(JSON, default=[])  # for batch results
+    result_urls = Column(JSON, default=list)  # for batch results
     thumbnail_url = Column(Text, default="")
     error_message = Column(Text, default="")
 
     # Provider
     provider_task_id = Column(String(200), default="", index=True)
-    provider_response = Column(JSON, default={})
+    provider_response = Column(JSON, default=dict)
 
     # Cost
     credits_reserved = Column(Float, default=0.0)
     credits_final = Column(Float, default=0.0)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 

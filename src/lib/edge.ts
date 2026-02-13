@@ -2,7 +2,7 @@
  * ReklamAI v2.0 — Edge Functions / API wrapper
  * Now talks to FastAPI backend instead of Supabase Edge Functions.
  */
-import { apiFetch, getToken } from './api';
+import { apiFetch, getToken, clearToken } from './api';
 
 export interface UploadFileParams {
   file: File;
@@ -102,6 +102,8 @@ export async function generate(params: GenerateParams): Promise<GenerateResponse
         prompt: params.prompt,
         preset_slug: params.presetKey,
         model_slug: params.modelKey,
+        aspect_ratio: params.input?.params?.aspect_ratio || params.input?.params?.aspectRatio,
+        duration: params.input?.params?.duration,
         input_image_url: params.input?.startFramePath,
         reference_image_url: params.input?.referenceImagePath,
         params: params.input?.params,
@@ -117,7 +119,7 @@ export async function generate(params: GenerateParams): Promise<GenerateResponse
     // Handle specific HTTP errors
     if (error.status === 401) {
       console.error('[Generate] 401 — clearing token');
-      const { clearToken } = await import('./api');
+      // clearToken already imported statically
       clearToken();
       window.location.reload();
       throw new Error('Session expired. Reloading...');

@@ -50,71 +50,113 @@ async def process_generation_fn(
                 "Content-Type": "application/json",
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{kie_base}/api/v1/jobs/createTask",
-                    json=payload,
-                    headers=headers,
-                )
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{kie_base}/api/v1/jobs/createTask",
+                        json=payload,
+                        headers=headers,
+                    )
 
-            if response.status_code != 200:
-                raise Exception(f"KIE error: {response.status_code} — {response.text}")
+                if response.status_code != 200:
+                    logger.error(f"[INNGEST] KIE API Error: {response.status_code} — {response.text}")
+                    return {"error": f"HTTP {response.status_code}", "raw": response.text}
 
-            data = response.json()
-            logger.info(f"[INNGEST] KIE response: {data}")
-            
-            # Extract task_id using various possible keys
-            task_id = data.get("taskId") or data.get("task_id") or data.get("id")
-            if not task_id and "data" in data:
-                task_id = data["data"].get("taskId") or data["data"].get("id")
-            
-            # Ensure we return a strict dict with task_id for the next step
-            return {
-                "task_id": task_id,
-                "raw": data
-            }
+                data = response.json()
+                logger.info(f"[INNGEST] KIE response: {data}")
+                
+                # Extract task_id
+                task_id = data.get("taskId") or data.get("task_id") or data.get("id")
+                if not task_id and "data" in data and data["data"]:
+                    task_id = data["data"].get("taskId") or data["data"].get("id")
+                
+                return {
+                    "task_id": task_id,
+                    "raw": data,
+                    "error": data.get("msg") if data.get("code") != 200 else None
+                }
+            except Exception as e:
+                logger.error(f"[INNGEST] KIE Call Exception: {e}")
+                return {"error": str(e)}
 
         kie_result = await step.run("call-kie-api", call_kie)
         task_id = kie_result.get("task_id", "")
+        
+        if not task_id:
+            error_msg = kie_result.get("error") or "Unknown KIE Error"
+            raise Exception(f"Failed to create KIE task: {error_msg}")
+
+        # Save provider_task_id to DB so webhook and status can find this generation
+        async def save_task_id() -> dict:
+            from app.database import async_session
+            from app.models import Generation
+            from sqlalchemy import select
+            async with async_session() as db:
+                result = await db.execute(
+                    select(Generation).where(Generation.id == generation_id)
+                )
+                gen = result.scalar_one_or_none()
+                if gen:
+                    gen.provider_task_id = task_id
+                    gen.status = "processing"
+                    await db.commit()
+                return {"saved": True}
+
+        await step.run("save-task-id", save_task_id)
 
         # Step 2: Poll for completion
         # Poll up to 60 times (10 minutes)
         from datetime import timedelta
         final_status = None
-        for _ in range(60):
-            await step.sleep("wait-10s", timedelta(seconds=10))
+        for poll_idx in range(60):
+            await step.sleep(f"wait-10s-{poll_idx}", timedelta(seconds=10))
             
-            # Check status
+            # Check status — each step must have a unique name
             async def check_kie() -> dict:
                 from app.kie_client import kie_client
                 return await kie_client.get_task_status(task_id)
 
-            status_response = await step.run("check-kie-status", check_kie)
+            status_response = await step.run(f"check-kie-status-{poll_idx}", check_kie)
             
-            # Map KIE status code to internal status
-            # 0: Processing, 1: Success, 2: Failed, 3: Canceled
             kie_data = status_response.get("data", {})
-            kie_status = kie_data.get("status")
+            # KIE uses 'state' string: 'generating', 'success', 'fail'
+            kie_state = kie_data.get("state")
             
             status = "processing"
-            if kie_status == 1:
+            if kie_state == "success":
                 status = "succeeded"
-            elif kie_status in [2, 3]:
+            elif kie_state in ["fail", "cancel"]:
                 status = "failed"
             
-            logger.info(f"[INNGEST] Polling task {task_id}: {status} (KIE code: {kie_status})")
+            logger.info(f"[INNGEST] Polling task {task_id}: {status} (KIE state: {kie_state})")
             
             if status in ["succeeded", "failed"]:
-                # Extract result URL
-                result_url = kie_data.get("resultUrl") or kie_data.get("url") or ""
-                # KIE might return a list of URLs
-                result_urls = kie_data.get("resultUrls") or ([result_url] if result_url else [])
+                # Extract result URL from resultJson (it's a stringified JSON)
+                result_url = ""
+                result_urls = []
+                
+                result_json_str = kie_data.get("resultJson")
+                if result_json_str:
+                    try:
+                        import json
+                        result_data = json.loads(result_json_str)
+                        result_urls = result_data.get("resultUrls") or []
+                        if result_urls:
+                            result_url = result_urls[0]
+                    except:
+                        pass
+                
+                # Fallbacks
+                if not result_url:
+                    result_url = kie_data.get("resultUrl") or kie_data.get("url") or ""
+                if not result_urls and result_url:
+                    result_urls = [result_url]
                 
                 final_status = {
                     "status": status,
                     "result_url": result_url,
                     "result_urls": result_urls,
-                    "error": kie_data.get("error") if status == "failed" else None
+                    "error": kie_data.get("failMsg") or kie_data.get("error") if status == "failed" else None
                 }
                 break
         
@@ -145,7 +187,7 @@ async def process_generation_fn(
                     gen.result_url = final_status.get("result_url") or ""
                     gen.result_urls = final_status.get("result_urls") or []
                     gen.provider_response = final_status
-                    # Credits already reserved, nothing to do
+                    gen.credits_final = gen.credits_reserved  # finalize cost
                     
                 elif kie_status == "failed":
                     gen.status = "failed"

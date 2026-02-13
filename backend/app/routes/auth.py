@@ -2,7 +2,7 @@
 ReklamAI v2.0 — Auth Routes
 Register, Login, Get Current User
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,12 +10,18 @@ from app.database import get_db
 from app.models import User, CreditAccount
 from app.schemas import RegisterRequest, LoginRequest, TokenResponse, UserResponse
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.rate_limit import rate_limit_auth
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(
+    req: RegisterRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rl=Depends(rate_limit_auth),
+):
     """Регистрация нового пользователя."""
     # Check if email exists
     existing = await db.execute(select(User).where(User.email == req.email))
@@ -52,7 +58,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(
+    req: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _rl=Depends(rate_limit_auth),
+):
     """Вход в аккаунт."""
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()

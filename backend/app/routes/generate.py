@@ -13,6 +13,7 @@ from app.schemas import (
     CreditBalanceResponse, AIModelResponse, PresetResponse,
 )
 from app.auth import get_current_user
+from app.rate_limit import rate_limit_generate
 from app.inngest_client import inngest_client
 import inngest
 
@@ -45,18 +46,11 @@ async def create_generation(
     req: GenerateRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _rl=Depends(rate_limit_generate),
 ):
     """Создать новую генерацию (фото/видео/голос/текст)."""
 
-    # 1. Check credits
-    result = await db.execute(
-        select(CreditAccount).where(CreditAccount.owner_id == user.id)
-    )
-    account = result.scalar_one_or_none()
-    if not account:
-        raise HTTPException(status_code=402, detail="Кредитный аккаунт не найден")
-
-    # Estimate cost based on model's price_multiplier
+    # 1. Estimate cost based on model's price_multiplier
     estimated_cost = 1.0  # base cost
     ai_model = None
     if req.model_slug:
@@ -70,13 +64,23 @@ async def create_generation(
             # Model not found in DB — use fallback
             estimated_cost = 5.0
 
+    # 2. Lock and check credits (SELECT ... FOR UPDATE prevents race conditions)
+    result = await db.execute(
+        select(CreditAccount)
+        .where(CreditAccount.owner_id == user.id)
+        .with_for_update()
+    )
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=402, detail="Кредитный аккаунт не найден")
+
     if account.balance < estimated_cost:
         raise HTTPException(
             status_code=402,
             detail=f"Недостаточно кредитов. Нужно: {estimated_cost}, Баланс: {account.balance}",
         )
 
-    # 2. Reserve credits
+    # 3. Reserve credits (row is locked, safe from concurrent writes)
     account.balance -= estimated_cost
     account.total_spent += estimated_cost
 

@@ -84,8 +84,12 @@ async def serve_file(
     user_id: str,
     purpose: str,
     filename: str,
+    user: User = Depends(get_current_user),
 ):
-    """Serve uploaded files (dev only; in production use S3/CDN)."""
+    """Serve uploaded files. User can only access their own files."""
+    if user.id != user_id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
     file_path = UPLOAD_DIR / user_id / purpose / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")

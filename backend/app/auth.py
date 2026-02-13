@@ -2,7 +2,7 @@
 ReklamAI v2.0 — Auth Service
 JWT token creation, password hashing, and user verification.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 import bcrypt
@@ -30,7 +30,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ── JWT ──
 def create_access_token(user_id: str, email: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expire_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
     payload = {
         "sub": user_id,
         "email": email,
