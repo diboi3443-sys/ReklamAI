@@ -51,10 +51,10 @@ import { useTheme } from "@/components/theme";
 
 // Mock data for selectors
 const mockBoards = [
-  { id: "none", name: "None" },
-  { id: "board-1", name: "Summer Campaign" },
-  { id: "board-2", name: "Product Shots" },
-  { id: "board-3", name: "Social Media" },
+  { id: "none", title: "None" },
+  { id: "board-1", title: "Summer Campaign" },
+  { id: "board-2", title: "Product Shots" },
+  { id: "board-3", title: "Social Media" },
 ];
 
 const imageModels = [
@@ -295,7 +295,7 @@ export default function SettingsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {mockBoards.map((board) => (
-                        <SelectItem key={board.id} value={board.id}>{board.name}</SelectItem>
+                        <SelectItem key={board.id} value={board.id}>{board.title}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

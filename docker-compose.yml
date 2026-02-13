@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: reklamai_user
+      POSTGRES_PASSWORD: reklamai_password
+      POSTGRES_DB: reklamai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U reklamai_user -d reklamai_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Inngest Dev Server
+  inngest:
+    image: node:18-alpine
+    restart: always
+    ports:
+      - "8288:8288"
+    environment:
+      INNGEST_EVENT_KEY: "no-key"
+      INNGEST_DEV: "1"
+    # Connect to the API container
+    command: [ "npx", "inngest-cli@latest", "dev", "-u", "http://api:8000/api/inngest", "--no-discovery", "--bind", "0.0.0.0" ]
+    depends_on:
+      api:
+        condition: service_started
+
+  # Backend API (FastAPI)
+  api:
+    build: ./backend
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://reklamai_user:reklamai_password@db:5432/reklamai_db
+      INNGEST_DEV: "1"
+      INNGEST_BASE_URL: "http://inngest:8288"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+volumes:
+  postgres_data:

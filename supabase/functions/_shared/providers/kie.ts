@@ -43,8 +43,15 @@ export async function kieGenerate(
 
   // Use modelKey directly (should be KIE.ai model identifier from DB)
   // No mapping needed - DB stores exact identifiers
-  const kieModelName = payload.modelKey;
-  console.log(`[KIE] Using model identifier: "${kieModelName}"`);
+  let kieModelName = payload.modelKey;
+
+  // Fix for "Market_" prefix in DB keys (e.g. Market_bytedance_v1...)
+  // KIE API expects the raw model ID (e.g. bytedance_v1...)
+  if (kieModelName.startsWith('Market_')) {
+    kieModelName = kieModelName.replace('Market_', '');
+  }
+
+  console.log(`[KIE] Using model identifier: "${kieModelName}" (original: ${payload.modelKey})`);
 
   // Get endpoint path if provided (for different API families)
   const endpointPath = (payload as any).endpointPath;

@@ -146,7 +146,7 @@ export default function BoardDetailPage() {
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div className="min-w-0">
-              <h1 className="text-xl font-bold truncate">{board.name}</h1>
+              <h1 className="text-xl font-bold truncate">{board.title}</h1>
               <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1">
                 {board.description}
               </p>

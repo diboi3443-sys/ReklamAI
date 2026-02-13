@@ -28,6 +28,9 @@ export interface ProviderGeneratePayload {
     audioUrl?: string;
     params?: Record<string, any>;
   };
+  endpointPath?: string;
+  apiFamily?: 'market' | 'veo3' | '4o-image' | 'runway' | 'luma' | 'flux-kontext' | 'suno';
+  callBackUrl?: string;
 }
 
 // Map provider status to internal status

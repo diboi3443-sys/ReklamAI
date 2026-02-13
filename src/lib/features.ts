@@ -316,7 +316,6 @@ export const aspectRatios = [
 
 // Duration options for video
 export const videoDurations = [
-  { value: "5", label: "5 sec", multiplier: 1 },
   { value: "10", label: "10 sec", multiplier: 2 },
   { value: "15", label: "15 sec", multiplier: 3 },
 ];

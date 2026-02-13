@@ -19,6 +19,7 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
+
 4. Выберите **Production**, **Preview**, и **Development**
 5. Нажмите **Save**
 

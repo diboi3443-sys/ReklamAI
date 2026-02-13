@@ -11,14 +11,10 @@ if (!rootElement) {
 }
 
 // Check environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const apiUrl = import.meta.env.VITE_API_URL;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Missing environment variables:");
-  console.error("VITE_SUPABASE_URL:", supabaseUrl ? "✓" : "✗");
-  console.error("VITE_SUPABASE_ANON_KEY:", supabaseAnonKey ? "✓" : "✗");
-  console.error("Please set these variables in Vercel Environment Variables");
+if (!apiUrl) {
+  console.warn("VITE_API_URL not set — defaulting to http://localhost:8000");
 }
 
 try {

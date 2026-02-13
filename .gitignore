@@ -1,8 +1,54 @@
-node_modules
-dist
+# ── Dependencies ──
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# ── Build output ──
+dist/
+.vite/
+
+# ── Environment & secrets ──
 .env
 .env.local
 .env.smoke
+.env.docker
+backend/.env
+backend/.env.docker
+
+# ── Logs ──
 *.log
+
+# ── OS files ──
 .DS_Store
-.vite
+**/.DS_Store
+Thumbs.db
+
+# ── Deploy artifacts (duplicates) ──
+reklamai-deploy*/
+reklamdeploy*/
+deploy-ready/
+*.zip
+
+# ── Vite temp files ──
+vite.config.ts.timestamp-*
+
+# ── Python / Backend ──
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/routes/__pycache__/
+backend/*.db
+backend/uploads/
+*.egg-info/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Misc ──
+hello-world-1*/

@@ -1,5 +1,5 @@
 // Shared utilities for status function (embedded for Dashboard deployment)
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from '@supabase/supabase-js';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
 // CORS

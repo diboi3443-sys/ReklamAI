@@ -3,7 +3,7 @@ import { ModeId } from "./features";
 // Board types
 export interface Board {
   id: string;
-  name: string;
+  title: string;  // Changed from 'name' to match DB schema
   description: string;
   thumbnail: string | null;
   itemsCount: number;
@@ -29,7 +29,7 @@ export interface BoardItem {
 export const mockBoards: Board[] = [
   {
     id: "board-1",
-    name: "Summer Campaign 2024",
+    title: "Summer Campaign 2024",
     description: "Beach and outdoor lifestyle ads for summer collection launch",
     thumbnail: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop",
     itemsCount: 24,
@@ -39,7 +39,7 @@ export const mockBoards: Board[] = [
   },
   {
     id: "board-2",
-    name: "Product Demos",
+    title: "Product Demos",
     description: "AI-generated product showcase videos and images",
     thumbnail: "https://images.unsplash.com/photo-1682687220742-aba13b6e50ba?w=400&h=300&fit=crop",
     itemsCount: 18,
@@ -49,7 +49,7 @@ export const mockBoards: Board[] = [
   },
   {
     id: "board-3",
-    name: "UGC Style Experiments",
+    title: "UGC Style Experiments",
     description: "Testing different UGC formats and styles",
     thumbnail: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=400&h=300&fit=crop",
     itemsCount: 32,
@@ -58,7 +58,7 @@ export const mockBoards: Board[] = [
   },
   {
     id: "board-4",
-    name: "Brand Refresh",
+    title: "Brand Refresh",
     description: "New visual identity explorations",
     thumbnail: "https://images.unsplash.com/photo-1433086966358-54859d0ed716?w=400&h=300&fit=crop",
     itemsCount: 15,
@@ -67,7 +67,7 @@ export const mockBoards: Board[] = [
   },
   {
     id: "board-5",
-    name: "Social Media Content",
+    title: "Social Media Content",
     description: "Instagram and TikTok content pieces",
     thumbnail: "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=400&h=300&fit=crop",
     itemsCount: 45,
@@ -76,7 +76,7 @@ export const mockBoards: Board[] = [
   },
   {
     id: "board-6",
-    name: "Cinematic Ads",
+    title: "Cinematic Ads",
     description: "High-end cinematic advertisement concepts",
     thumbnail: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=400&h=300&fit=crop",
     itemsCount: 8,
@@ -188,7 +188,7 @@ export const mockBoardItems: BoardItem[] = [
 // Board context for Studio
 export interface BoardContext {
   currentBoardId: string | null;
-  currentBoardName: string | null;
+  currentBoardTitle: string | null;
 }
 
 // Get board by ID

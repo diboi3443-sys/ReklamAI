@@ -1,6 +1,7 @@
 // Authentication helpers for Edge Functions
 /// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
 import { createServiceClient } from './supabase.ts';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * Safe base64url decoder using Web APIs available in Deno.
@@ -125,26 +126,26 @@ export async function createAuthedUserClient(req: Request): Promise<{
   userClient: any;
   user: { id: string; email?: string };
   token: string;
-} | null> {
+} | { error: string; details?: string } | null> {
   const t0 = Date.now();
 
   // Extract from Authorization Bearer token
   const authHeader = req.headers.get('Authorization') || '';
   if (!authHeader.startsWith('Bearer ')) {
     console.log(`[AUTH] Missing Bearer token`);
-    return null;
+    return { error: 'Missing Bearer token' };
   }
 
   const token = authHeader.slice('Bearer '.length).trim();
   if (!token) {
     console.log(`[AUTH] Empty token`);
-    return null;
+    return { error: 'Empty token' };
   }
 
   const userInfo = getUserFromJwtOrNull(token);
   if (!userInfo) {
-    console.log(`[AUTH] JWT decode failed`);
-    return null;
+    console.log(`[AUTH] JWT decode failed or expired`);
+    return { error: 'JWT invalid or expired' };
   }
 
   console.log(`[AUTH] User ID: ${userInfo.id}`);
@@ -153,7 +154,7 @@ export async function createAuthedUserClient(req: Request): Promise<{
   const serviceClient = createServiceClient();
 
   // Create user client with their token for RLS-aware writes
-  const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+  // Used to be dynamic import, changed to static to fix bundling timeout
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 
@@ -182,6 +183,21 @@ export async function createAuthedUserClient(req: Request): Promise<{
       persistSession: false,
     },
   });
+
+  // Verify token validity by checking with Supabase Auth
+  const { data: authData, error: authError } = await userClient.auth.getUser();
+  if (authError || !authData.user) {
+    console.error(`[AUTH] Token Verification Failed: ${authError?.message}`);
+    return { error: `Token rejected by Auth Service: ${authError?.message}` };
+  }
+
+  // Ensure the user ID matches the claim
+  if (authData.user.id !== userInfo.id) {
+    console.error(`[AUTH] User ID mismatch: Token claim ${userInfo.id} vs Auth Service ${authData.user.id}`);
+    return { error: 'User ID mismatch' };
+  }
+
+  console.log(`[AUTH] Token verified successfully for user ${authData.user.id}`);
 
   const duration = Date.now() - t0;
   console.log(`[AUTH] Auth successful in ${duration}ms, userClient created`);

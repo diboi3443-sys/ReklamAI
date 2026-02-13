@@ -412,7 +412,7 @@ export function OnboardingModal({ open, onOpenChange, onComplete }: OnboardingMo
                         )} />
                       </div>
                       <div className="flex-1">
-                        <p className="font-medium">{board.name}</p>
+                        <p className="font-medium">{board.title}</p>
                         <p className="text-sm text-muted-foreground">{board.itemsCount} {t.boards.items}</p>
                       </div>
                       {selectedBoard === board.id && (

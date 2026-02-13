@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Grid3X3,
@@ -68,7 +68,8 @@ import { PageContainer, PageHeader, PageContent } from "@/components/ui/page-lay
 import { ModeId, modes, featuresByMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/i18n";
-import { supabase } from "@/lib/supabase";
+import { generationsApi, apiFetch, type GenerationItem } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 
 // Types
 type ItemStatus = "ready" | "generating" | "error";
@@ -616,6 +617,7 @@ function ListRow({
 export default function LibraryPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [viewTab, setViewTab] = useState<"all" | "boards">("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [searchQuery, setSearchQuery] = useState("");
@@ -626,101 +628,71 @@ export default function LibraryPage() {
   const [boardFilter, setBoardFilter] = useState<string>("all");
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
-  // State for items from Supabase
+  // State for items from API
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [boards, setBoards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load generations from Supabase
+  // Load generations from API
   useEffect(() => {
     async function loadData() {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setLoading(false);
         return;
       }
 
-      // Load generations
-      // Note: Must use explicit foreign key syntax: table_name!foreign_key_column(...)
-      // because preset_id != presets and model_id != models
-      const { data: generations, error: genError } = await supabase
-        .from('generations')
-        .select(`
-          *,
-          presets!preset_id(title_ru, title_en, type, key),
-          models!model_id(title, provider, key),
-          assets(kind, storage_path, storage_bucket)
-        `)
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
+      try {
+        // Load generations and boards in parallel
+        const [genResult, boardsData] = await Promise.all([
+          generationsApi.list({ limit: 20 }),
+          apiFetch<any[]>('/api/boards').catch(() => []),
+        ]);
 
-      // Load boards
-      const { data: boardsData } = await supabase
-        .from('boards')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
+        const generations = genResult.items || [];
 
-      if (!genError && generations) {
+        // Map modality to mode
+        const modeMap: Record<string, ModeId> = {
+          image: 'image',
+          video: 'video',
+          edit: 'edit',
+          audio: 'image',
+        };
+
+        // Map status
+        const statusMap: Record<string, ItemStatus> = {
+          succeeded: 'ready',
+          processing: 'generating',
+          queued: 'generating',
+          failed: 'error',
+          cancelled: 'error',
+        };
+
         // Convert generations to LibraryItem format
-        const libraryItems: LibraryItem[] = await Promise.all(
-          generations.map(async (gen: any) => {
-            // Find output asset for thumbnail
-            const outputAsset = gen.assets?.find((a: any) => a.kind === 'output');
-            let thumbnail = '';
-            if (outputAsset) {
-              const { data: signedUrl } = await supabase.storage
-                .from(outputAsset.storage_bucket)
-                .createSignedUrl(outputAsset.storage_path, 3600);
-              thumbnail = signedUrl?.signedUrl || '';
-            }
-
-            // Map modality to mode
-            const modeMap: Record<string, ModeId> = {
-              image: 'image',
-              video: 'video',
-              edit: 'edit',
-              audio: 'image',
-            };
-
-            // Map status
-            const statusMap: Record<string, ItemStatus> = {
-              succeeded: 'ready',
-              processing: 'generating',
-              queued: 'generating',
-              failed: 'error',
-              cancelled: 'error',
-            };
-
-            return {
-              id: gen.id,
-              thumbnail: thumbnail || '/placeholder.svg',
-              mode: modeMap[gen.modality] || 'image',
-              featureId: gen.presets?.key || gen.preset_id || '',
-              featureName: gen.presets?.title_en || gen.presets?.title_ru || 'Generation',
-              model: gen.models?.title || gen.models?.key || 'Unknown',
-              prompt: gen.prompt || '',
-              credits: Number(gen.final_credits || gen.estimated_credits || 0),
-              status: statusMap[gen.status] || 'ready',
-              createdAt: gen.created_at,
-              versionType: 'generated' as VersionType,
-            };
-          })
-        );
+        const libraryItems: LibraryItem[] = generations.map((gen) => ({
+          id: gen.id,
+          thumbnail: gen.thumbnail_url || gen.result_url || '/placeholder.svg',
+          mode: modeMap[gen.modality || 'image'] || 'image',
+          featureId: gen.preset_slug || '',
+          featureName: gen.preset?.title_en || gen.preset_slug || 'Generation',
+          model: gen.model?.title || gen.model_slug || 'Unknown',
+          prompt: gen.prompt || '',
+          credits: Number(gen.credits_final || gen.credits_reserved || 0),
+          status: statusMap[gen.status] || 'ready',
+          createdAt: gen.created_at,
+          versionType: 'generated' as VersionType,
+        }));
 
         setItems(libraryItems);
-      }
-
-      if (boardsData) {
         setBoards(boardsData);
+      } catch (err) {
+        console.error('Failed to load library data:', err);
       }
 
       setLoading(false);
     }
 
     loadData();
-  }, []);
+  }, [user]);
 
   // Get unique values for filters
   const models = useMemo(() => [...new Set(items.map((item) => item.model))], [items]);
@@ -758,7 +730,7 @@ export default function LibraryPage() {
             break;
           case "month":
             matchesDate = itemDate.getMonth() === now.getMonth() &&
-                         itemDate.getFullYear() === now.getFullYear();
+              itemDate.getFullYear() === now.getFullYear();
             break;
         }
       }
@@ -800,7 +772,7 @@ export default function LibraryPage() {
   const totalWithVersions = flattenedItems.length;
 
   const hasFilters = modeFilter !== "all" || featureFilter !== "all" ||
-                    modelFilter !== "all" || dateFilter !== "all";
+    modelFilter !== "all" || dateFilter !== "all";
 
   const clearFilters = () => {
     setModeFilter("all");
@@ -940,79 +912,79 @@ export default function LibraryPage() {
 
         {/* Filters - only show for All Items tab */}
         {viewTab === "all" && (
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px] max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder={t.library.searchPlaceholder}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[200px] max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder={t.library.searchPlaceholder}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
+            <Select value={modeFilter} onValueChange={setModeFilter}>
+              <SelectTrigger className="w-[140px]">
+                <Filter className="w-4 h-4 mr-2" />
+                <SelectValue placeholder={t.modes.image} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t.library.allModes}</SelectItem>
+                {modes.map((mode) => (
+                  <SelectItem key={mode.id} value={mode.id}>
+                    {mode.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={featureFilter} onValueChange={setFeatureFilter}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder={t.studio.feature} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t.library.allFeatures}</SelectItem>
+                {features.map((feature) => (
+                  <SelectItem key={feature} value={feature}>
+                    {feature}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={modelFilter} onValueChange={setModelFilter}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder={t.studio.model} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t.common.all} Models</SelectItem>
+                {models.map((model) => (
+                  <SelectItem key={model} value={model}>
+                    {model}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={dateFilter} onValueChange={setDateFilter}>
+              <SelectTrigger className="w-[130px]">
+                <Calendar className="w-4 h-4 mr-2" />
+                <SelectValue placeholder={t.common.date} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t.common.all}</SelectItem>
+                <SelectItem value="today">{t.time.today}</SelectItem>
+                <SelectItem value="week">{t.time.daysAgo}</SelectItem>
+                <SelectItem value="month">{t.time.daysAgo}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <X className="w-4 h-4 mr-1" /> {t.common.filter}
+              </Button>
+            )}
           </div>
-
-          <Select value={modeFilter} onValueChange={setModeFilter}>
-            <SelectTrigger className="w-[140px]">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder={t.modes.image} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t.library.allModes}</SelectItem>
-              {modes.map((mode) => (
-                <SelectItem key={mode.id} value={mode.id}>
-                  {mode.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={featureFilter} onValueChange={setFeatureFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder={t.studio.feature} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t.library.allFeatures}</SelectItem>
-              {features.map((feature) => (
-                <SelectItem key={feature} value={feature}>
-                  {feature}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={modelFilter} onValueChange={setModelFilter}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder={t.studio.model} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t.common.all} Models</SelectItem>
-              {models.map((model) => (
-                <SelectItem key={model} value={model}>
-                  {model}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="w-[130px]">
-              <Calendar className="w-4 h-4 mr-2" />
-              <SelectValue placeholder={t.common.date} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t.common.all}</SelectItem>
-              <SelectItem value="today">{t.time.today}</SelectItem>
-              <SelectItem value="week">{t.time.daysAgo}</SelectItem>
-              <SelectItem value="month">{t.time.daysAgo}</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {hasFilters && (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              <X className="w-4 h-4 mr-1" /> {t.common.filter}
-            </Button>
-          )}
-        </div>
         )}
       </div>
 
@@ -1033,47 +1005,47 @@ export default function LibraryPage() {
                 <p className="text-sm text-muted-foreground mb-4">{t.boards.createFirstBoard}</p>
               </div>
             ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {boards.map((board) => (
-                <Card
-                  key={board.id}
-                  variant="interactive"
-                  className="overflow-hidden cursor-pointer group"
-                  onClick={() => navigate(`/boards/${board.id}`)}
-                >
-                  <div className="relative aspect-video">
-                    {board.thumbnail ? (
-                      <img
-                        src={board.thumbnail}
-                        alt={board.title}
-                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-secondary flex items-center justify-center">
-                        <LayoutGrid className="w-8 h-8 text-muted-foreground/50" />
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {boards.map((board) => (
+                  <Card
+                    key={board.id}
+                    variant="interactive"
+                    className="overflow-hidden cursor-pointer group"
+                    onClick={() => navigate(`/boards/${board.id}`)}
+                  >
+                    <div className="relative aspect-video">
+                      {board.thumbnail ? (
+                        <img
+                          src={board.thumbnail}
+                          alt={board.title}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-secondary flex items-center justify-center">
+                          <LayoutGrid className="w-8 h-8 text-muted-foreground/50" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                      <div className="absolute bottom-2 left-2 right-2">
+                        <h3 className="font-medium text-white truncate">{board.title}</h3>
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-                    <div className="absolute bottom-2 left-2 right-2">
-                      <h3 className="font-medium text-white truncate">{board.title}</h3>
                     </div>
-                  </div>
-                  <CardContent className="p-3">
-                    <p className="text-xs text-muted-foreground line-clamp-1">
-                      {board.description || ''}
-                    </p>
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-xs text-muted-foreground">
-                        {board.itemsCount || 0} {t.boards.items}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(board.updated_at || board.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    <CardContent className="p-3">
+                      <p className="text-xs text-muted-foreground line-clamp-1">
+                        {board.description || ''}
+                      </p>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-xs text-muted-foreground">
+                          {board.itemsCount || 0} {t.boards.items}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(board.updated_at || board.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )
           ) : filteredTree.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">

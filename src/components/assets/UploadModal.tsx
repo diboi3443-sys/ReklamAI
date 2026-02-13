@@ -354,7 +354,7 @@ export function UploadModal({ open, onOpenChange, onUploadComplete }: UploadModa
                 <SelectItem value="none">{t.assets.noBoard}</SelectItem>
                 {mockBoards.map((board) => (
                   <SelectItem key={board.id} value={board.id}>
-                    {board.name}
+                    {board.title}
                   </SelectItem>
                 ))}
               </SelectContent>

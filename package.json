@@ -18,7 +18,10 @@
     "smoke:kie:models": "node --env-file=.env.smoke node_modules/tsx/dist/cli.mjs scripts/smoke-test-kie-models.ts",
     "kie:models:build": "node_modules/tsx/dist/cli.mjs scripts/kie-scrape-models.ts",
     "kie:models:seed": "node_modules/tsx/dist/cli.mjs scripts/kie-seed-models.ts",
-    "mac:setup": "bash scripts/mac-setup.sh"
+    "kie:models:seed": "node_modules/tsx/dist/cli.mjs scripts/kie-seed-models.ts",
+    "mac:setup": "bash scripts/mac-setup.sh",
+    "verify": "bash scripts/verify_project.sh",
+    "test:all": "npm run build && npm run verify"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

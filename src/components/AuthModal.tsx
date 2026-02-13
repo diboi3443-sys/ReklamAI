@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/lib/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 interface AuthModalProps {
@@ -22,6 +22,7 @@ interface AuthModalProps {
 
 export function AuthModal({ open, onOpenChange }: AuthModalProps) {
   const { toast } = useToast();
+  const { login, register } = useAuth();
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"login" | "signup">("login");
 
@@ -39,25 +40,21 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginEmail,
-        password: loginPassword,
-      });
-
-      if (error) throw error;
+      const user = await login(loginEmail, loginPassword);
 
       toast({
         title: "Успешный вход",
-        description: `Добро пожаловать, ${data.user?.email}!`,
+        description: `Добро пожаловать, ${user.email}!`,
       });
 
       onOpenChange(false);
       setLoginEmail("");
       setLoginPassword("");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Не удалось войти";
       toast({
         title: "Ошибка входа",
-        description: error.message || "Не удалось войти",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -70,31 +67,22 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: signupEmail,
-        password: signupPassword,
-        options: {
-          data: {
-            full_name: signupName,
-          },
-        },
-      });
-
-      if (error) throw error;
+      await register(signupEmail, signupPassword, signupName);
 
       toast({
         title: "Регистрация успешна",
-        description: "Проверьте email для подтверждения аккаунта",
+        description: "Аккаунт создан, вы вошли в систему",
       });
 
       onOpenChange(false);
       setSignupEmail("");
       setSignupPassword("");
       setSignupName("");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Не удалось зарегистрироваться";
       toast({
         title: "Ошибка регистрации",
-        description: error.message || "Не удалось зарегистрироваться",
+        description: message,
         variant: "destructive",
       });
     } finally {

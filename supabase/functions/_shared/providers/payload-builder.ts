@@ -37,37 +37,37 @@ export function buildKiePayload(
 
   // Detect model type from key
   const isImageModel = modelKey.includes('image') ||
-                       modelKey.includes('seedream') ||
-                       modelKey.includes('flux') ||
-                       modelKey.includes('imagen') ||
-                       modelKey.includes('grok-imagine') ||
-                       modelKey.includes('gpt-image') ||
-                       modelKey.includes('ideogram') ||
-                       modelKey.includes('recraft') ||
-                       modelKey.includes('topaz') ||
-                       modelKey.includes('z-image') ||
-                       modelKey.includes('qwen');
+    modelKey.includes('seedream') ||
+    modelKey.includes('flux') ||
+    modelKey.includes('imagen') ||
+    modelKey.includes('grok-imagine') ||
+    modelKey.includes('gpt-image') ||
+    modelKey.includes('ideogram') ||
+    modelKey.includes('recraft') ||
+    modelKey.includes('topaz') ||
+    modelKey.includes('z-image') ||
+    modelKey.includes('qwen');
 
   const isVideoModel = modelKey.includes('video') ||
-                       modelKey.includes('kling') ||
-                       modelKey.includes('bytedance') ||
-                       modelKey.includes('seedance') ||
-                       modelKey.includes('hailuo') ||
-                       modelKey.includes('sora') ||
-                       modelKey.includes('wan') ||
-                       modelKey.includes('veo3') ||
-                       modelKey.includes('runway') ||
-                       modelKey.includes('gen3') ||
-                       modelKey.includes('gen4') ||
-                       modelKey.includes('luma');
+    modelKey.includes('kling') ||
+    modelKey.includes('bytedance') ||
+    modelKey.includes('seedance') ||
+    modelKey.includes('hailuo') ||
+    modelKey.includes('sora') ||
+    modelKey.includes('wan') ||
+    modelKey.includes('veo3') ||
+    modelKey.includes('runway') ||
+    modelKey.includes('gen3') ||
+    modelKey.includes('gen4') ||
+    modelKey.includes('luma');
 
   const isAudioModel = modelKey.includes('elevenlabs') ||
-                       modelKey.includes('infinitalk') ||
-                       modelKey.includes('audio') ||
-                       modelKey.includes('sound-effect') ||
-                       modelKey.includes('speech') ||
-                       modelKey.includes('chirp') ||
-                       modelKey.includes('suno');
+    modelKey.includes('infinitalk') ||
+    modelKey.includes('audio') ||
+    modelKey.includes('sound-effect') ||
+    modelKey.includes('speech') ||
+    modelKey.includes('chirp') ||
+    modelKey.includes('suno');
 
   // === SPECIAL API FAMILIES ===
 
@@ -86,7 +86,7 @@ export function buildKiePayload(
     } else if (modelKey.includes('v4-5') || modelKey.includes('v4_5')) {
       sunoModel = 'V4_5';
     }
-    
+
     payload.model = sunoModel;
     payload.prompt = input.prompt;
     payload.instrumental = input.params?.instrumental !== undefined ? input.params.instrumental : false;
@@ -191,15 +191,15 @@ export function buildKiePayload(
 
   // Models requiring aspect_ratio
   const requiresAspectRatio = modelKey.includes('grok-imagine') ||
-                               modelKey.includes('ideogram') ||
-                               modelKey.includes('flux-2') ||
-                               modelKey.includes('flux2') ||
-                               modelKey.includes('seedream') ||
-                               modelKey.includes('z-image');
+    modelKey.includes('ideogram') ||
+    modelKey.includes('flux-2') ||
+    modelKey.includes('flux2') ||
+    modelKey.includes('seedream') ||
+    modelKey.includes('z-image');
   if (requiresAspectRatio) {
     payload.aspect_ratio = input.params?.aspect_ratio || '1:1';
   }
-  
+
   // Flux-2 models require resolution
   const isFlux2 = modelKey.includes('flux-2') || modelKey.includes('flux2');
   if (isFlux2) {
@@ -209,11 +209,11 @@ export function buildKiePayload(
   // Image models
   if (isImageModel && input.referenceImageUrl) {
     if (modelKey.includes('image-to-image') ||
-        modelKey.includes('edit') ||
-        modelKey.includes('upscale') ||
-        modelKey.includes('remove-background') ||
-        modelKey.includes('crisp-upscale') ||
-        modelKey.includes('reframe')) {
+      modelKey.includes('edit') ||
+      modelKey.includes('upscale') ||
+      modelKey.includes('remove-background') ||
+      modelKey.includes('crisp-upscale') ||
+      modelKey.includes('reframe')) {
       payload.image = input.referenceImageUrl;
     } else {
       payload.reference_image = input.referenceImageUrl;
@@ -234,9 +234,9 @@ export function buildKiePayload(
     if (input.endFrameUrl) {
       payload.end_frame = input.endFrameUrl;
     }
-    // Video duration
+    // Video duration - MUST be a string for KIE API
     if (input.params?.duration) {
-      payload.duration = input.params.duration;
+      payload.duration = String(input.params.duration);
     }
   }
 

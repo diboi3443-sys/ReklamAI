@@ -19,7 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { ProgressBar } from "@/components/ui/status";
 import { cn } from "@/lib/utils";
 import { getStatus } from "@/lib/edge";
-import { supabase } from "@/lib/supabase";
+import { generationsApi } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { useTranslation } from "@/i18n";
 
 // Define generation steps
@@ -87,7 +88,7 @@ function GenerationCard({ generation }: { generation: any }) {
 
   // Get preset name
   const presetTitle = generation.presets?.title_en || generation.presets?.title_ru || 'Generation';
-  const modelTitle = generation.models?.title || generation.models?.key || 'Unknown Model';
+  const modelTitle = generation.models?.title || 'Unknown Model';
 
   const formatTime = (ms: number) => {
     if (ms < 0) return '0s';
@@ -233,104 +234,69 @@ export default function ProgressPage() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [generations, setGenerations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load generations from Supabase
+  // Load active generations from API
   useEffect(() => {
-    async function loadGenerations() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('generations')
-        .select(`
-          *,
-          presets!preset_id(title_ru, title_en, type),
-          models!model_id(title, provider, key)
-        `)
-        .eq('owner_id', user.id)
-        .in('status', ['queued', 'processing'])
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
-        setGenerations(data);
-      }
+    if (!user) {
       setLoading(false);
+      return;
+    }
+
+    async function loadGenerations() {
+      try {
+        const data = await generationsApi.list({ status: 'processing', limit: 20 });
+        setGenerations(data.items || []);
+      } catch (err) {
+        console.error('[ProgressPage] Failed to load generations:', err);
+      } finally {
+        setLoading(false);
+      }
     }
 
     loadGenerations();
 
     // Poll for status updates every 2 seconds
-    // IMPORTANT: Use setGenerations callback to always get latest state
     const interval = setInterval(async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      setGenerations((prev) => {
+        const activeGens = prev.filter((g) => g.status === 'queued' || g.status === 'processing');
+        if (activeGens.length === 0) return prev;
 
-      // Reload active generations periodically to catch new ones
-      const { data: activeGens } = await supabase
-        .from('generations')
-        .select('id, status')
-        .eq('owner_id', user.id)
-        .in('status', ['queued', 'processing']);
-
-      if (!activeGens || activeGens.length === 0) return;
-
-      // Poll each active generation
-      for (const gen of activeGens) {
-        try {
-          console.log(`[ProgressPage] Polling status for generation: ${gen.id}`);
-          const status = await getStatus(gen.id);
-
-          // Update generation status in state
-          setGenerations((prev) =>
-            prev.map((g) =>
-              g.id === gen.id
-                ? { ...g, status: status.status, progress: status.progress, signedPreviewUrl: status.signedPreviewUrl }
-                : g
-            )
-          );
-
-          // If succeeded, navigate to result
-          if (status.status === 'succeeded' && status.signedPreviewUrl) {
-            navigate(`/result/${gen.id}`, { state: { url: status.signedPreviewUrl } });
+        // Poll each active generation (fire-and-forget, update via state callback)
+        activeGens.forEach(async (gen) => {
+          try {
+            const status = await getStatus(gen.id);
+            setGenerations((current) =>
+              current.map((g) =>
+                g.id === gen.id
+                  ? { ...g, status: status.status, progress: status.progress, signedPreviewUrl: status.signedPreviewUrl }
+                  : g
+              )
+            );
+            if (status.status === 'succeeded' && status.signedPreviewUrl) {
+              navigate(`/result/${gen.id}`, { state: { url: status.signedPreviewUrl } });
+            }
+          } catch (error) {
+            console.error(`[ProgressPage] Error polling ${gen.id}:`, error);
           }
-        } catch (error) {
-          console.error(`[ProgressPage] Error polling status for ${gen.id}:`, error);
-        }
-      }
+        });
+        return prev;
+      });
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [navigate]);
+  }, [user, navigate]);
 
   // Handle new generation from Create page
   useEffect(() => {
     if (location.state?.generationId) {
-      // Load the new generation
-      async function loadGeneration() {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const { data, error } = await supabase
-          .from('generations')
-          .select(`
-            *,
-            presets!preset_id(title_ru, title_en, type),
-            models!model_id(title, provider, key)
-          `)
-          .eq('id', location.state.generationId)
-          .eq('owner_id', user.id)
-          .single();
-
-        if (!error && data) {
+      generationsApi.get(location.state.generationId)
+        .then((data) => {
           setGenerations((prev) => [data, ...prev.filter((g) => g.id !== data.id)]);
-        }
-      }
-      loadGeneration();
+        })
+        .catch((err) => console.error('[ProgressPage] Failed to load generation:', err));
     }
   }, [location.state]);
 

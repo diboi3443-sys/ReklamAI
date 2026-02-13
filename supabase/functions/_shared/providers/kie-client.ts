@@ -207,12 +207,11 @@ export class KieClient {
     console.log(`[KIE] ===== CREATE TASK REQUEST =====`);
     console.log(`[KIE] Model parameter: ${model}`);
     console.log(`[KIE] Model value in request: ${modelValue}`);
-    console.log(`[KIE] Model type: ${typeof modelValue}`);
-    console.log(`[KIE] Request URL: ${url}`);
-    console.log(`[KIE] Request body keys: ${Object.keys(requestBody).join(', ')}`);
-    console.log(`[KIE] Input keys: ${Object.keys(requestBody.input || {}).join(', ')}`);
-    console.log(`[KIE] Top-level model field: ${requestBody.model || 'MISSING'}`);
-    // Log sanitized body (payload-builder doesn't include secrets, so safe to log)
+
+    // CRITICAL DEBUG: Log the exact payload being sent
+    // This will show up in Supabase Edge Function Logs
+    console.log(`[KIE_PAYLOAD_DEBUG]`, JSON.stringify(requestBody, null, 2));
+
     const sanitizedBody = JSON.parse(JSON.stringify(requestBody));
     console.log(`[KIE] Full request body:`, JSON.stringify(sanitizedBody, null, 2));
     console.log(`[KIE] ===============================`);
@@ -310,22 +309,22 @@ export class KieClient {
         // Extract taskId from various possible fields (KIE Market API may use different field names)
         // Common patterns: id, taskId, task_id, jobId, job_id, data.id, data.taskId, data.recordId, etc.
         const taskId = data.id ||
-                      data.task_id ||
-                      data.taskId ||
-                      data.job_id ||
-                      data.jobId ||
-                      data.recordId ||
-                      data.task?.id ||
-                      data.job?.id ||
-                      data.result?.id ||
-                      data.result?.taskId ||
-                      (data.data && (
-                        data.data.id ||
-                        data.data.task_id ||
-                        data.data.taskId ||
-                        data.data.jobId ||
-                        data.data.recordId
-                      ));
+          data.task_id ||
+          data.taskId ||
+          data.job_id ||
+          data.jobId ||
+          data.recordId ||
+          data.task?.id ||
+          data.job?.id ||
+          data.result?.id ||
+          data.result?.taskId ||
+          (data.data && (
+            data.data.id ||
+            data.data.task_id ||
+            data.data.taskId ||
+            data.data.jobId ||
+            data.data.recordId
+          ));
 
         if (!taskId) {
           console.error(`[KIE] No task ID found in response`);
@@ -387,7 +386,7 @@ export class KieClient {
   }> {
     // Use provided statusEndpointPath or default to Market API
     const statusPath = statusEndpointPath || '/api/v1/jobs/recordInfo';
-    
+
     // Detect API type from endpoint path to determine method and URL format
     const isVeo3 = statusPath.includes('/veo/');
     const isRunway = statusPath.includes('/runway/');
@@ -396,11 +395,11 @@ export class KieClient {
     const isSuno = statusPath.includes('/generate/record-info') || statusPath === '/api/v1/generate';
     const isFluxKontext = statusPath.includes('/flux/kontext/');
     const isSpecialApi = isVeo3 || isRunway || isLuma || is4oImage || isSuno || isFluxKontext;
-    
+
     // Build URL based on API type
     let url: string;
     let usePostMethod = false;
-    
+
     if (isSpecialApi) {
       // Special APIs use query parameter for taskId
       url = `${this.baseUrl}${statusPath}?taskId=${encodeURIComponent(taskId)}`;
@@ -416,13 +415,13 @@ export class KieClient {
     }
 
     // Safe logging
-      console.log(`[KIE] ===== GET TASK STATUS =====`);
-      console.log(`[KIE] Task ID: ${taskId}`);
-      console.log(`[KIE] Method: ${usePostMethod ? 'POST' : 'GET'}`);
-      if (modelKey) {
-        console.log(`[KIE] Model: ${modelKey}`);
-      }
-      console.log(`[KIE] Request URL: ${url}`);
+    console.log(`[KIE] ===== GET TASK STATUS =====`);
+    console.log(`[KIE] Task ID: ${taskId}`);
+    console.log(`[KIE] Method: ${usePostMethod ? 'POST' : 'GET'}`);
+    if (modelKey) {
+      console.log(`[KIE] Model: ${modelKey}`);
+    }
+    console.log(`[KIE] Request URL: ${url}`);
 
     // Create AbortController for timeout (10 seconds max for status check)
     const controller = new AbortController();
@@ -438,14 +437,14 @@ export class KieClient {
         },
         signal: controller.signal,
       };
-      
+
       if (usePostMethod) {
         // For Flux Kontext, use taskId in body (may need to strip prefix)
         const taskIdForBody = taskId.replace('fluxkontext_', '');
         fetchOptions.body = JSON.stringify({ taskId: taskIdForBody });
         console.log(`[KIE] POST body: ${JSON.stringify({ taskId: taskIdForBody })}`);
       }
-      
+
       const response = await fetch(url, fetchOptions);
 
       clearTimeout(timeoutId);
@@ -455,7 +454,7 @@ export class KieClient {
       // Parse response body (we need to handle 422 as potential "still processing" for special APIs)
       const contentType = response.headers.get('content-type') || '';
       const isJson = contentType.includes('application/json');
-      
+
       let data: any;
       if (isJson) {
         data = await response.json();
@@ -463,20 +462,20 @@ export class KieClient {
         const textBody = await response.text();
         data = { message: textBody.substring(0, 200) };
       }
-      
+
       // Handle "recordInfo is null" response for special API tasks (Flux Kontext, Veo3, etc.)
       // This happens when the task is still being processed by the special API
       // Note: KIE returns HTTP 200 with code: 422 in body for this case
-      if ((data.code === 422 || response.status === 422) && 
-          (data.msg === 'recordInfo is null' || data.data === null)) {
+      if ((data.code === 422 || response.status === 422) &&
+        (data.msg === 'recordInfo is null' || data.data === null)) {
         console.log(`[KIE] Task ${taskId} not in Market API, trying special API endpoint...`);
-        
+
         // For Flux Kontext tasks, try the dedicated status endpoint
         if (isFluxKontext) {
           try {
             const fluxStatusUrl = `${this.baseUrl}/api/v1/flux/kontext/getImageDetails`;
             console.log(`[KIE] Trying Flux Kontext status endpoint: ${fluxStatusUrl}`);
-            
+
             // Try POST with taskId in body
             const fluxResponse = await fetch(fluxStatusUrl, {
               method: 'POST',
@@ -486,19 +485,19 @@ export class KieClient {
               },
               body: JSON.stringify({ taskId }),
             });
-            
+
             console.log(`[KIE] Flux status response: ${fluxResponse.status}`);
             const fluxData = await fluxResponse.json();
             console.log(`[KIE] Flux status data:`, JSON.stringify(fluxData));
-            
+
             // Check if we got a valid response
             if (fluxResponse.ok && fluxData.data) {
               const taskData = fluxData.data;
               const state = taskData.state || taskData.status || 'processing';
               const outputUrl = taskData.resultUrl || taskData.outputUrl || taskData.url;
-              
+
               console.log(`[KIE] Flux task state from dedicated endpoint: ${state}`);
-              
+
               return {
                 status: this.mapStatus(state),
                 progress: taskData.progress || (state === 'succeeded' ? 100 : 50),
@@ -510,7 +509,7 @@ export class KieClient {
             console.log(`[KIE] Flux status endpoint failed: ${fluxError.message}`);
           }
         }
-        
+
         // Fallback to processing status
         console.log(`[KIE] Task ${taskId} still processing in special API`);
         return {
@@ -563,8 +562,8 @@ export class KieClient {
       // Fallback to direct fields
       if (!outputUrl) {
         outputUrl = taskData.output_url || taskData.outputUrl || taskData.result_url ||
-                   taskData.resultUrl || taskData.download_url || taskData.downloadUrl ||
-                   data.output_url || data.outputUrl || data.result_url || data.resultUrl;
+          taskData.resultUrl || taskData.download_url || taskData.downloadUrl ||
+          data.output_url || data.outputUrl || data.result_url || data.resultUrl;
       }
 
       // Extract error from taskData if available
@@ -673,16 +672,16 @@ export class KieClient {
       // Fallback to direct fields
       if (!downloadUrl) {
         downloadUrl = taskData.url ||
-                     taskData.download_url ||
-                     taskData.downloadUrl ||
-                     taskData.output_url ||
-                     taskData.outputUrl ||
-                     taskData.result_url ||
-                     taskData.resultUrl ||
-                     data.url ||
-                     data.download_url ||
-                     data.output_url ||
-                     data.result_url;
+          taskData.download_url ||
+          taskData.downloadUrl ||
+          taskData.output_url ||
+          taskData.outputUrl ||
+          taskData.result_url ||
+          taskData.resultUrl ||
+          data.url ||
+          data.download_url ||
+          data.output_url ||
+          data.result_url;
       }
 
       if (!downloadUrl) {

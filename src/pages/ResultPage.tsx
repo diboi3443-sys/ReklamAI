@@ -35,84 +35,46 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabase";
+import { generationsApi } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { getStatus } from "@/lib/edge";
 
 export default function ResultPage() {
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [imageUrl, setImageUrl] = useState<string>("");
 
-  // Load generation data from Supabase
+  // Load generation data from API
   useEffect(() => {
     async function loadResult() {
-      if (!id) {
-        setLoading(false);
-        return;
-      }
+      if (!id) { setLoading(false); return; }
+      if (!user) { navigate("/"); return; }
 
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          navigate("/");
-          return;
-        }
+        const generation = await generationsApi.get(id);
 
-        // Load generation with related data
-        const { data: generation, error } = await supabase
-          .from("generations")
-          .select(`
-            *,
-            presets!preset_id(title_ru, title_en, type, key),
-            models!model_id(title, key, provider)
-          `)
-          .eq("id", id)
-          .eq("owner_id", user.id)
-          .single();
-
-        if (error || !generation) {
-          console.error("Error loading generation:", error);
-          setLoading(false);
-          return;
-        }
-
-        // Get signed URL for output image
-        let signedUrl = location.state?.url;
+        // Get result URL — prefer location state, then generation data, then poll
+        let signedUrl = location.state?.url || generation.result_url;
         if (!signedUrl) {
-          // Try to get from assets
-          const { data: asset } = await supabase
-            .from("assets")
-            .select("storage_bucket, storage_path")
-            .eq("generation_id", id)
-            .eq("kind", "output")
-            .single();
-
-          if (asset) {
-            const { data: urlData } = await supabase.storage
-              .from(asset.storage_bucket)
-              .createSignedUrl(asset.storage_path, 3600);
-            signedUrl = urlData?.signedUrl;
-          } else {
-            // If no asset, try to get status (which may have signedPreviewUrl)
-            try {
-              const status = await getStatus(id);
-              signedUrl = status.signedPreviewUrl;
-            } catch (statusError) {
-              console.error("Error getting status:", statusError);
-            }
+          try {
+            const status = await getStatus(id);
+            signedUrl = status.signedPreviewUrl;
+          } catch (statusError) {
+            console.error("Error getting status:", statusError);
           }
         }
 
         setResult({
           id: generation.id,
-          preset: generation.presets?.title_en || generation.presets?.title_ru || "Generation",
-          model: generation.models?.title || generation.models?.key || "Unknown",
+          preset: generation.preset_slug || "Generation",
+          model: generation.model_slug || "Unknown",
           prompt: generation.prompt || "",
-          seed: generation.input?.params?.seed || generation.input?.seed || null,
+          seed: generation.input?.params?.seed || null,
           aspectRatio: generation.input?.params?.aspect_ratio || "16:9",
           credits: generation.final_credits || generation.estimated_credits || 0,
           createdAt: generation.created_at,
@@ -127,7 +89,7 @@ export default function ResultPage() {
     }
 
     loadResult();
-  }, [id, location.state, navigate]);
+  }, [id, location.state, navigate, user]);
 
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text);

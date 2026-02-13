@@ -34,7 +34,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/i18n";
-import { supabase } from "@/lib/supabase";
+import { generationsApi, type GenerationItem } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 
 // Types
 interface HistoryItem {
@@ -210,97 +211,59 @@ export function GenerationHistoryPanel({
   onSelectItem,
 }: GenerationHistoryPanelProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [currentJob, setCurrentJob] = useState<HistoryItem | null>(null);
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load generations from Supabase
+  // Load generations from API
   useEffect(() => {
     async function loadGenerations() {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('generations')
-        .select(`
-          *,
-          presets!preset_id(title_ru, title_en, type),
-          models!model_id(title, provider, key),
-          assets(kind, storage_path, storage_bucket)
-        `)
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
+      try {
+        const data = await generationsApi.list({ limit: 20 });
+        const records = data.items || [];
 
-      if (!error && data) {
-        const records = data as GenerationRecord[];
         // Find current processing job
         const processing = records.find((g) => g.status === 'queued' || g.status === 'processing');
         if (processing) {
-          // Get thumbnail from assets or generate placeholder
-          const outputAsset = processing.assets?.find((a) => a.kind === 'output');
-          let thumbnail = '';
-          if (outputAsset) {
-            const { data: signedUrl } = await supabase.storage
-              .from(outputAsset.storage_bucket)
-              .createSignedUrl(outputAsset.storage_path, 3600);
-            thumbnail = signedUrl?.signedUrl || '';
-          }
-
           setCurrentJob({
             id: processing.id,
-            type: processing.modality === 'video' ? 'video' : 'image',
-            thumbnail,
+            type: (processing.modality === 'video' ? 'video' : 'image') as 'image' | 'video',
+            thumbnail: processing.thumbnail_url || '',
             prompt: processing.prompt,
-            preset: processing.presets?.title_en || processing.presets?.title_ru || 'Generation',
-            model: processing.models?.title || processing.models?.key || 'Unknown',
-            aspectRatio: '16:9', // Could extract from input.params
-            credits: Number(processing.final_credits || processing.estimated_credits || 0),
-            status: processing.status === 'succeeded' ? 'done' : processing.status === 'failed' ? 'failed' : 'processing',
+            preset: processing.preset?.title_en || processing.preset_slug || 'Generation',
+            model: processing.model?.title || processing.model_slug || 'Unknown',
+            aspectRatio: processing.input?.params?.aspect_ratio || '16:9',
+            credits: Number(processing.credits_final || processing.credits_reserved || 0),
+            status: 'processing',
             progress: processing.progress,
             createdAt: new Date(processing.created_at),
           });
         }
 
         // Convert to history items
-        const items: HistoryItem[] = records.slice(0, 10).map((g) => {
-          const outputAsset = g.assets?.find((a) => a.kind === 'output');
-          return {
-            id: g.id,
-            type: g.modality === 'video' ? 'video' : 'image',
-            thumbnail: outputAsset ? `placeholder-${g.id}` : '',
-            prompt: g.prompt,
-            preset: g.presets?.title_en || g.presets?.title_ru || 'Generation',
-            model: g.models?.title || g.models?.key || 'Unknown',
-            aspectRatio: '16:9',
-            credits: Number(g.final_credits || g.estimated_credits || 0),
-            status: g.status === 'succeeded' ? 'done' : g.status === 'failed' ? 'failed' : 'processing',
-            progress: g.progress,
-            createdAt: new Date(g.created_at),
-          };
-        });
-
-        // Load thumbnails for items
-        for (const item of items) {
-          if (item.thumbnail.startsWith('placeholder-')) {
-            const genId = item.thumbnail.replace('placeholder-', '');
-            const gen = records.find((g) => g.id === genId);
-            if (gen) {
-              const outputAsset = gen.assets?.find((a) => a.kind === 'output');
-              if (outputAsset) {
-                const { data: signedUrl } = await supabase.storage
-                  .from(outputAsset.storage_bucket)
-                  .createSignedUrl(outputAsset.storage_path, 3600);
-                item.thumbnail = signedUrl?.signedUrl || '';
-              }
-            }
-          }
-        }
+        const items: HistoryItem[] = records.slice(0, 10).map((g) => ({
+          id: g.id,
+          type: (g.modality === 'video' ? 'video' : 'image') as 'image' | 'video',
+          thumbnail: g.thumbnail_url || g.result_url || '',
+          prompt: g.prompt,
+          preset: g.preset?.title_en || g.preset_slug || 'Generation',
+          model: g.model?.title || g.model_slug || 'Unknown',
+          aspectRatio: '16:9',
+          credits: Number(g.credits_final || g.credits_reserved || 0),
+          status: g.status === 'succeeded' ? 'done' : g.status === 'failed' ? 'failed' : 'processing',
+          progress: g.progress,
+          createdAt: new Date(g.created_at),
+        }));
 
         setHistoryItems(items);
+      } catch (err) {
+        console.error('Failed to load generation history:', err);
       }
       setLoading(false);
     }
@@ -308,7 +271,7 @@ export function GenerationHistoryPanel({
     if (open) {
       loadGenerations();
     }
-  }, [open]);
+  }, [open, user]);
 
   const formatTimeAgo = (date: Date) => {
     const now = new Date();

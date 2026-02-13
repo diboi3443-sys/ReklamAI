@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { User, Settings, CreditCard, LogOut, LogIn } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -13,66 +13,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTranslation } from "@/i18n";
-import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/lib/AuthContext";
 import { AuthModal } from "@/components/AuthModal";
-
-interface UserData {
-  id: string;
-  email: string;
-  name: string;
-  initials: string;
-  avatar: string | null;
-}
 
 export function UserMenu() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [user, setUser] = useState<UserData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, loading, logout } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
-  useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        const email = session.user.email || '';
-        const name = session.user.user_metadata?.full_name || email.split('@')[0];
-        const initials = name.slice(0, 2).toUpperCase();
-        setUser({
-          id: session.user.id,
-          email,
-          name,
-          initials,
-          avatar: session.user.user_metadata?.avatar_url || null,
-        });
-      }
-      setLoading(false);
-    });
+  const name = user?.full_name || user?.email?.split('@')[0] || '';
+  const initials = name.slice(0, 2).toUpperCase();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        const email = session.user.email || '';
-        const name = session.user.user_metadata?.full_name || email.split('@')[0];
-        const initials = name.slice(0, 2).toUpperCase();
-        setUser({
-          id: session.user.id,
-          email,
-          name,
-          initials,
-          avatar: session.user.user_metadata?.avatar_url || null,
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
+  const handleLogout = () => {
+    logout();
     navigate('/');
   };
 
@@ -108,9 +62,9 @@ export function UserMenu() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="relative h-9 w-9 rounded-full">
             <Avatar className="h-9 w-9">
-              <AvatarImage src={user?.avatar || undefined} alt={user?.name} />
+              <AvatarImage src={user?.avatar_url || undefined} alt={name} />
               <AvatarFallback className="gradient-brand text-primary-foreground text-sm">
-                {user?.initials}
+                {initials}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -118,7 +72,7 @@ export function UserMenu() {
         <DropdownMenuContent align="end" className="w-56">
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col space-y-1">
-              <p className="text-sm font-medium leading-none">{user?.name}</p>
+              <p className="text-sm font-medium leading-none">{name}</p>
               <p className="text-xs text-muted-foreground leading-none">{user?.email}</p>
             </div>
           </DropdownMenuLabel>

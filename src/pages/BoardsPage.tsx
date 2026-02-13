@@ -50,7 +50,8 @@ import {
 import { PageContainer, PageHeader, PageContent } from "@/components/ui/page-layout";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/i18n";
-import { supabase } from "@/lib/supabase";
+import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { toast } from "sonner";
 
 type SortOption = "recent" | "name" | "items";
@@ -59,6 +60,7 @@ type FilterOption = "all" | "pinned" | "active";
 export default function BoardsPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("recent");
   const [filterBy, setFilterBy] = useState<FilterOption>("all");
@@ -69,42 +71,31 @@ export default function BoardsPage() {
   const [boards, setBoards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load boards from Supabase
+  // Load boards from API
   useEffect(() => {
     async function loadBoards() {
-      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         setLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('boards')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
+      try {
+        const data = await apiFetch<any[]>('/api/boards');
         // Map to Board format with itemsCount
-        const boardsWithCounts = await Promise.all(data.map(async (board) => {
-          const { count } = await supabase
-            .from('generations')
-            .select('*', { count: 'exact', head: true })
-            .eq('board_id', board.id);
-          return {
-            ...board,
-            name: board.title,
-            itemsCount: count || 0,
-            isPinned: false, // TODO: Add pinned field to schema
-            updatedAt: board.updated_at || board.created_at,
-          };
+        const boardsWithCounts = data.map((board: any) => ({
+          ...board,
+          itemsCount: board.items_count || 0,
+          isPinned: board.is_pinned || false,
+          updatedAt: board.updated_at || board.created_at,
         }));
         setBoards(boardsWithCounts);
+      } catch (err) {
+        console.error('Failed to load boards:', err);
       }
       setLoading(false);
     }
     loadBoards();
-  }, []);
+  }, [user]);
 
   // Filter and sort boards
   const filteredBoards = React.useMemo(() => {
@@ -115,8 +106,8 @@ export default function BoardsPage() {
       const query = searchQuery.toLowerCase();
       result = result.filter(
         (board) =>
-          board.name.toLowerCase().includes(query) ||
-          board.description.toLowerCase().includes(query)
+          board.title.toLowerCase().includes(query) ||
+          (board.description || '').toLowerCase().includes(query)
       );
     }
 
@@ -133,7 +124,7 @@ export default function BoardsPage() {
     // Sort
     switch (sortBy) {
       case "name":
-        result.sort((a, b) => a.name.localeCompare(b.name));
+        result.sort((a, b) => a.title.localeCompare(b.title));
         break;
       case "items":
         result.sort((a, b) => b.itemsCount - a.itemsCount);
@@ -157,41 +148,36 @@ export default function BoardsPage() {
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       toast.error(t.common.error);
       return;
     }
 
-    const { data, error } = await supabase
-      .from('boards')
-      .insert({
-        owner_id: user.id,
-        title: newBoardName.trim(),
-        description: newBoardDescription.trim() || null,
-      })
-      .select()
-      .single();
+    try {
+      const data = await apiFetch<any>('/api/boards', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: newBoardName.trim(),
+          description: newBoardDescription.trim() || null,
+        }),
+      });
 
-    if (error) {
+      // Add to boards list
+      setBoards((prev) => [{
+        ...data,
+        itemsCount: 0,
+        isPinned: data.is_pinned || false,
+        updatedAt: data.updated_at || data.created_at,
+      }, ...prev]);
+
+      toast.success(t.common.success);
+      setCreateDialogOpen(false);
+      setNewBoardName("");
+      setNewBoardDescription("");
+    } catch (error: any) {
       console.error('Error creating board:', error);
       toast.error(error.message || t.common.error);
-      return;
     }
-
-    // Add to boards list
-    setBoards((prev) => [{
-      ...data,
-      name: data.title,
-      itemsCount: 0,
-      isPinned: false,
-      updatedAt: data.updated_at || data.created_at,
-    }, ...prev]);
-
-    toast.success(t.common.success);
-    setCreateDialogOpen(false);
-    setNewBoardName("");
-    setNewBoardDescription("");
   };
 
   const formatDate = (dateString: string) => {
@@ -353,7 +339,7 @@ function BoardCard({ board, onOpen, formatDate, t }: BoardCardProps) {
         {board.thumbnail ? (
           <img
             src={board.thumbnail}
-            alt={board.name || board.title}
+            alt={board.title}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
@@ -429,7 +415,7 @@ function BoardCard({ board, onOpen, formatDate, t }: BoardCardProps) {
       {/* Content */}
       <CardContent className="p-4 space-y-2">
         <h3 className="font-semibold truncate group-hover:text-primary transition-colors">
-          {board.name || board.title}
+          {board.title}
         </h3>
         <p className="text-sm text-muted-foreground line-clamp-2">
           {board.description || ''}

@@ -75,10 +75,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const authDuration = Date.now() - tAuth;
     console.log(`[GENERATE] [STEP 2] AFTER auth check completed in ${authDuration}ms`);
 
-    if (!authResult) {
+    if (!authResult || 'error' in authResult) {
       const duration = Date.now() - t0;
-      console.error(`[GENERATE] Auth failed (returning 401 in ${duration}ms)`);
-      return json({ code: 401, message: 'Unauthorized' }, 401);
+      const errorMsg = authResult && 'error' in authResult ? authResult.error : 'Unauthorized';
+      console.error(`[GENERATE] Auth failed: ${errorMsg} (returning 401 in ${duration}ms)`);
+      return json({ code: 401, message: errorMsg }, 401);
     }
 
     user = authResult.user;
@@ -318,46 +319,40 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const tUrls = Date.now();
     console.log(`[GENERATE] [STEP 11] BEFORE creating signed URLs at ${tUrls - t0}ms`);
     const inputUrls: any = {};
-    if (input?.startFramePath) {
+
+    // Helper to get URL (signed or direct)
+    const getFileUrl = async (pathOrUrl: string): Promise<string | undefined> => {
+      if (!pathOrUrl) return undefined;
+      // If it's already a URL, use it directly
+      if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+        console.log(`[GENERATE] Using direct URL for input: ${pathOrUrl.substring(0, 50)}...`);
+        return pathOrUrl;
+      }
+      // Otherwise, create signed URL
       const tUrl = Date.now();
       const { data: signedUrl } = await supabase.storage
         .from('uploads')
-        .createSignedUrl(input.startFramePath, 3600);
-      console.log(`[GENERATE] startFramePath signed URL created in ${Date.now() - tUrl}ms`);
-      inputUrls.startFrameUrl = signedUrl?.signedUrl;
+        .createSignedUrl(pathOrUrl, 3600);
+      console.log(`[GENERATE] Signed URL created for ${pathOrUrl} in ${Date.now() - tUrl}ms`);
+      return signedUrl?.signedUrl;
+    };
+
+    if (input?.startFramePath) {
+      inputUrls.startFrameUrl = await getFileUrl(input.startFramePath);
     }
     if (input?.referenceImagePath) {
-      const tUrl = Date.now();
-      const { data: signedUrl } = await supabase.storage
-        .from('uploads')
-        .createSignedUrl(input.referenceImagePath, 3600);
-      console.log(`[GENERATE] referenceImagePath signed URL created in ${Date.now() - tUrl}ms`);
-      inputUrls.referenceImageUrl = signedUrl?.signedUrl;
+      inputUrls.referenceImageUrl = await getFileUrl(input.referenceImagePath);
     }
     if (input?.referenceVideoPath) {
-      const tUrl = Date.now();
-      const { data: signedUrl } = await supabase.storage
-        .from('uploads')
-        .createSignedUrl(input.referenceVideoPath, 3600);
-      console.log(`[GENERATE] referenceVideoPath signed URL created in ${Date.now() - tUrl}ms`);
-      inputUrls.referenceVideoUrl = signedUrl?.signedUrl;
+      inputUrls.referenceVideoUrl = await getFileUrl(input.referenceVideoPath);
     }
     if (input?.endFramePath) {
-      const tUrl = Date.now();
-      const { data: signedUrl } = await supabase.storage
-        .from('uploads')
-        .createSignedUrl(input.endFramePath, 3600);
-      console.log(`[GENERATE] endFramePath signed URL created in ${Date.now() - tUrl}ms`);
-      inputUrls.endFrameUrl = signedUrl?.signedUrl;
+      inputUrls.endFrameUrl = await getFileUrl(input.endFramePath);
     }
     if (input?.audioPath) {
-      const tUrl = Date.now();
-      const { data: signedUrl } = await supabase.storage
-        .from('uploads')
-        .createSignedUrl(input.audioPath, 3600);
-      console.log(`[GENERATE] audioPath signed URL created in ${Date.now() - tUrl}ms`);
-      inputUrls.audioUrl = signedUrl?.signedUrl;
+      inputUrls.audioUrl = await getFileUrl(input.audioPath);
     }
+
     const urlsDuration = Date.now() - tUrls;
     console.log(`[GENERATE] [STEP 11] AFTER all signed URLs created in ${urlsDuration}ms`);
 
@@ -389,7 +384,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const requiresCallback = capabilities.requires_callback === true;
       const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
       const callBackUrl = requiresCallback ? `${supabaseUrl}/functions/v1/provider-webhook` : undefined;
-      
+
       if (requiresCallback) {
         console.log(`[GENERATE] Model requires callback, using callBackUrl: ${callBackUrl}`);
       }
@@ -492,7 +487,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const errorCode = (providerError as any)?.code;
       const is422ModelError = errorCode === 422 ||
         (errorMessage.includes('422') &&
-         (errorMessage.toLowerCase().includes('model') || errorMessage.toLowerCase().includes('not supported')));
+          (errorMessage.toLowerCase().includes('model') || errorMessage.toLowerCase().includes('not supported')));
 
       // Use already computed modelIdentifier from above
       // Also check if error has modelSent from kie-client
@@ -527,11 +522,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const isHtmlError = errorMessage.includes('HTML') || errorMessage.includes('<!DOCTYPE');
       const errorSnippet = errorMessage.length > 200 ? errorMessage.substring(0, 200) + '...' : errorMessage;
 
+      // Extract more details from error if available
+      const errorDetails = (providerError as any)?.details || {};
+      const providerErrorCode = (providerError as any)?.code;
+
       return json({
-        error: 'Provider error',
+        error: errorMessage, // Return detailed message as the main error
         provider: 'kie',
         message: errorMessage,
+        code: providerErrorCode,
+        modelKey: model?.key,
+        modelIdentifier: modelIdentifier,
+        apiFamily: apiFamily,
+        endpointPath: endpoints?.createPath,
         provider_body_snippet: isHtmlError ? errorSnippet : undefined,
+        details: errorDetails,
+        hint: `Проверьте: 1) модель "${modelIdentifier}" доступна в KIE, 2) API ключ имеет права на ${apiFamily} API, 3) правильность endpoint ${endpoints?.createPath}, 4) логи Edge Function для деталей`,
       }, statusCode);
     }
   } catch (error: any) {

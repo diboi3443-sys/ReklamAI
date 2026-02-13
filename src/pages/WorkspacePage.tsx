@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ChevronDown,
   Sparkles,
@@ -20,6 +20,8 @@ import {
   RefreshCw,
   Shuffle,
   Play,
+  Settings2,
+  PanelRightOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,12 +61,20 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/i18n";
 import { loadModelsByModality, DatabaseModel } from "@/lib/models";
-import { generate, getStatus } from "@/lib/edge";
-import { supabase } from "@/lib/supabase";
+import { generate, getStatus, uploadFile } from "@/lib/edge";
+import { useAuth } from "@/lib/AuthContext";
 import { AuthModal } from "@/components/AuthModal";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useDebounce } from "@/hooks/use-debounce";
 
 export default function WorkspacePage() {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
+  const { user, token } = useAuth();
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [mobileResultOpen, setMobileResultOpen] = useState(false);
+
   // State
   const [selectedMode, setSelectedMode] = useState<ModeId>("video");
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null);
@@ -78,7 +88,7 @@ export default function WorkspacePage() {
   const [prompt, setPrompt] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [aspectRatio, setAspectRatio] = useState("16:9");
-  const [duration, setDuration] = useState("5");
+  const [duration, setDuration] = useState("10"); // Default to 10s (safer for most models)
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
 
@@ -110,6 +120,26 @@ export default function WorkspacePage() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [currentGenerationId, setCurrentGenerationId] = useState<string | null>(null);
 
+  // State for image handling files (not just strings)
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const refFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Persist prompt with debounce to avoid input lag
+  const debouncedPrompt = useDebounce(prompt, 1000);
+
+  useEffect(() => {
+    const savedPrompt = localStorage.getItem('reklamai-prompt');
+    if (savedPrompt) setPrompt(savedPrompt);
+  }, []);
+
+  useEffect(() => {
+    if (debouncedPrompt) {
+      localStorage.setItem('reklamai-prompt', debouncedPrompt);
+    }
+  }, [debouncedPrompt]);
+
   // Load models from database
   useEffect(() => {
     const loadModels = async () => {
@@ -119,7 +149,7 @@ export default function WorkspacePage() {
       console.log('[WorkspacePage] Loaded models from DB:', models.length);
       setDbModels(models);
       setModelsLoading(false);
-      
+
       // Set first model as default if available
       if (models.length > 0 && !selectedModel) {
         setSelectedModel(models[0].key);
@@ -163,8 +193,7 @@ export default function WorkspacePage() {
     if (!selectedFeature || (!prompt.trim() && selectedFeature.requiredInputs.includes("prompt"))) return;
 
     // Check authentication
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    if (!user || !token) {
       setAuthModalOpen(true);
       return;
     }
@@ -188,7 +217,8 @@ export default function WorkspacePage() {
 
       // Call generate API
       console.log('[WorkspacePage] Calling generate API...');
-      const generateResult = await generate({
+
+      const generateParams: any = {
         presetKey,
         modelKey: selectedModel,
         prompt: prompt.trim(),
@@ -198,7 +228,50 @@ export default function WorkspacePage() {
             duration: selectedMode === 'video' ? parseInt(duration) : undefined,
           },
         },
-      });
+      };
+
+      // Handle Image Uploads
+      if (uploadedFile) {
+        console.log('[WorkspacePage] Uploading start frame/image...');
+        const uploadResult = await uploadFile({
+          file: uploadedFile,
+          purpose: selectedMode === 'video' ? 'startFrame' : 'referenceImage'
+        });
+        if (uploadResult.path) {
+          // Add to inputs
+          if (!generateParams.input) generateParams.input = {};
+          if (selectedMode === 'video') {
+            generateParams.input.startFramePath = uploadResult.path;
+          } else {
+            generateParams.input.referenceImagePath = uploadResult.path;
+          }
+        }
+      } else if (uploadedImage && uploadedImage.startsWith('http')) {
+        // Handle remote URL (e.g. from previous result)
+        if (!generateParams.input) generateParams.input = {};
+        if (selectedMode === 'video') {
+          generateParams.input.startFramePath = uploadedImage;
+        } else {
+          generateParams.input.referenceImagePath = uploadedImage;
+        }
+      }
+
+      // Handle Reference Image Uploads (separate from main input)
+      if (referenceFile) {
+        console.log('[WorkspacePage] Uploading reference image...');
+        const uploadResult = await uploadFile({
+          file: referenceFile,
+          purpose: 'referenceImage'
+        });
+        if (uploadResult.path) {
+          if (!generateParams.input) generateParams.input = {};
+          generateParams.input.referenceImagePath = uploadResult.path;
+        }
+      }
+
+      // Call generate API
+      console.log('[WorkspacePage] Calling generate API with params:', generateParams);
+      const generateResult = await generate(generateParams);
 
       console.log('[WorkspacePage] Generate result:', generateResult);
       setCurrentGenerationId(generateResult.generationId);
@@ -211,14 +284,14 @@ export default function WorkspacePage() {
       // Poll for status
       let attempts = 0;
       const maxAttempts = 300; // 5 minutes max for video generation
-      
+
       while (attempts < maxAttempts) {
         const statusResult = await getStatus(generateResult.generationId);
         console.log('[WorkspacePage] Status result:', statusResult);
 
         if (statusResult.status === 'succeeded') {
           setProgress(100);
-          
+
           if (statusResult.signedPreviewUrl) {
             setResultUrl(statusResult.signedPreviewUrl);
             setResultMediaType(selectedMode === "video" ? "video" : "image");
@@ -269,13 +342,16 @@ export default function WorkspacePage() {
       console.error('[WorkspacePage] Generation error:', error);
       setCanvasState("empty");
       setProgress(0);
-      
+
       // Show user-friendly error message
       let errorMessage = 'Произошла ошибка при генерации';
       if (error.code === 402 || error.type === 'insufficient_credits') {
         errorMessage = 'Недостаточно кредитов для генерации. Пожалуйста, пополните баланс.';
       } else if (error.code === 502 || error.type === 'provider_error') {
         errorMessage = 'Ошибка провайдера. Пожалуйста, попробуйте еще раз через несколько секунд.';
+        if (error.message && !error.message.includes('Provider error')) {
+          errorMessage += `\n\nДетали: ${error.message}`;
+        }
         if (error.hint) {
           errorMessage += `\n\nПодсказка: ${error.hint}`;
         }
@@ -284,7 +360,7 @@ export default function WorkspacePage() {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       // You can add toast notification here
       alert(errorMessage);
     }
@@ -295,7 +371,7 @@ export default function WorkspacePage() {
     // Determine version type based on tool
     let versionType: VersionType = "edited";
     let editLabel = "Prompt edit";
-    
+
     switch (editData.tool) {
       case "crop":
         versionType = "cropped";
@@ -319,7 +395,7 @@ export default function WorkspacePage() {
         editLabel = editData.prompt?.slice(0, 20) + "..." || "Prompt edit";
         break;
     }
-    
+
     handleGenerate(versionType, editLabel);
     setEditorOpen(false);
   };
@@ -367,6 +443,379 @@ export default function WorkspacePage() {
     cinema: t.modes.cinema,
   };
 
+  const ControlsContent = React.useMemo(() => {
+    return (
+      <>
+        <div className="p-4 border-b border-border shrink-0">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 block">
+            {t.studio.selectedPreset}
+          </label>
+          <SelectedPresetCard
+            feature={selectedFeature}
+            preset={selectedPreset}
+            model={selectedModel}
+            mode={selectedMode}
+            onChangePresetClick={() => setPresetSelectorOpen(true)}
+            onChangeFeatureClick={() => setFeaturePickerOpen(true)}
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0">
+          {/* Model Selection */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              {t.studio.model}
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info className="w-3 h-3" />
+                </TooltipTrigger>
+                <TooltipContent>{t.studio.aiEngine}</TooltipContent>
+              </Tooltip>
+            </label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger>
+                <SelectValue placeholder={modelsLoading ? "Loading..." : "Select model"} />
+              </SelectTrigger>
+              <SelectContent>
+                {modelsLoading ? (
+                  <div className="p-2 text-sm text-muted-foreground">Loading models...</div>
+                ) : dbModels.length === 0 ? (
+                  <div className="p-2 text-sm text-muted-foreground">No models available</div>
+                ) : (
+                  dbModels.map((model) => (
+                    <SelectItem key={model.key} value={model.key}>
+                      <div className="flex items-center gap-2">
+                        <span>{model.title}</span>
+                        <Badge variant="outline" size="sm">{model.provider}</Badge>
+                      </div>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Image Upload */}
+          {requiresImage && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t.studio.sourceImage}
+              </label>
+              {uploadedImage ? (
+                <div className="relative rounded-lg overflow-hidden">
+                  <img
+                    src={uploadedImage}
+                    alt="Uploaded"
+                    className="w-full h-32 object-cover"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => setUploadedImage(null)}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setUploadedFile(file);
+                        setUploadedImage(URL.createObjectURL(file));
+                      }
+                    }}
+                  />
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    {t.studio.dropImageOrClick}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Reference Image */}
+          {requiresReference && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t.studio.referenceImage}
+              </label>
+              {referenceImage ? (
+                <div className="relative rounded-lg overflow-hidden">
+                  <img
+                    src={referenceImage}
+                    alt="Reference"
+                    className="w-full h-32 object-cover"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon-sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => setReferenceImage(null)}
+                  >
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() => refFileInputRef.current?.click()}
+                >
+                  <input
+                    type="file"
+                    ref={refFileInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setReferenceFile(file);
+                        setReferenceImage(URL.createObjectURL(file));
+                      }
+                    }}
+                  />
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    {t.studio.addReference}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Aspect Ratio */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              {t.studio.aspectRatio}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {aspectRatios.slice(0, 6).map((ratio) => (
+                <Button
+                  key={ratio.value}
+                  variant={aspectRatio === ratio.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setAspectRatio(ratio.value)}
+                  className="text-xs"
+                >
+                  {ratio.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Duration (Video only) */}
+          {isVideoMode && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                {t.studio.duration}
+              </label>
+              <div className="flex gap-2">
+                {videoDurations.map((dur) => (
+                  <Button
+                    key={dur.value}
+                    variant={duration === dur.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setDuration(dur.value)}
+                    className="flex-1"
+                  >
+                    {dur.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Prompt Input */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              {t.studio.prompt}
+            </label>
+            <Textarea
+              variant="glow"
+              textareaSize="lg"
+              placeholder={
+                selectedFeature?.requiredInputs.includes("prompt")
+                  ? t.studio.promptPlaceholder
+                  : t.studio.optionalPrompt
+              }
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+        </div>
+
+        <div className="shrink-0 p-4 border-t border-border bg-card">
+          <div className="flex items-center gap-3">
+            <Badge variant="glow" size="sm" className="gap-1 shrink-0">
+              <span className="font-semibold">{calculateCost()}</span>
+              <Zap className="w-3 h-3" />
+            </Badge>
+            <Button
+              variant="glow"
+              size="default"
+              className="flex-1"
+              onClick={() => {
+                handleGenerate("generated");
+                setMobileSettingsOpen(false);
+              }}
+              disabled={
+                !selectedFeature ||
+                (!prompt.trim() && selectedFeature.requiredInputs.includes("prompt")) ||
+                canvasState === "generating"
+              }
+            >
+              <Sparkles className="w-4 h-4" />
+              {t.common.generate}
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  }, [
+    t,
+    selectedFeature,
+    selectedPreset,
+    selectedModel,
+    selectedMode,
+    modelsLoading,
+    dbModels,
+    uploadedImage,
+    referenceImage,
+    aspectRatio,
+    duration,
+    prompt,
+    canvasState,
+    calculateCost,
+    handleGenerate,
+    setPresetSelectorOpen,
+    setFeaturePickerOpen,
+    setSelectedModel,
+    setUploadedImage,
+    setUploadedFile,
+    setReferenceImage,
+    setReferenceFile,
+    setAspectRatio,
+    setDuration,
+    setPrompt,
+    setMobileSettingsOpen,
+    fileInputRef,
+    refFileInputRef
+  ]);
+
+  const ResultContent = () => (
+    <>
+      <div className="p-4 border-b border-border">
+        <h2 className="text-sm font-medium">{t.studio.resultActions}</h2>
+      </div>
+
+      <div className="flex-1 p-4 overflow-y-auto space-y-4">
+        {/* Quick Actions */}
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" size="sm" onClick={() => { handleGenerate("generated", "Re-run"); setMobileResultOpen(false); }}>
+            <RefreshCw className="w-3 h-3" />
+            {t.common.rerun}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { handleGenerate("variation", "Variation"); setMobileResultOpen(false); }}>
+            <Shuffle className="w-3 h-3" />
+            {t.common.variation}
+          </Button>
+        </div>
+
+        {/* Prompt */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-muted-foreground">
+              {t.studio.prompt}
+            </label>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleCopyPrompt}
+            >
+              {copied ? (
+                <Check className="w-3 h-3 text-success" />
+              ) : (
+                <Copy className="w-3 h-3" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground line-clamp-4">
+            {prompt}
+          </p>
+        </div>
+
+        {/* Metadata */}
+        {metadata && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Cpu className="w-3.5 h-3.5" />
+                <span className="text-xs">{t.studio.model}</span>
+              </div>
+              <Badge variant="secondary" size="sm">
+                {selectedModel}
+              </Badge>
+            </div>
+
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Hash className="w-3.5 h-3.5" />
+                <span className="text-xs">{t.studio.seed}</span>
+              </div>
+              <span className="text-xs font-mono">{metadata.seed}</span>
+            </div>
+
+            <div className="flex items-center justify-between py-2 border-b border-border/50">
+              <span className="text-xs text-muted-foreground">{t.studio.creditsUsed}</span>
+              <Badge variant="outline" size="sm" className="gap-1">
+                <span className="font-semibold">{metadata.creditsUsed}</span>
+                <Zap className="w-3 h-3" />
+              </Badge>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Calendar className="w-3.5 h-3.5" />
+                <span className="text-xs">{t.studio.createdAt}</span>
+              </div>
+              <span className="text-xs">
+                {metadata.createdAt.toLocaleTimeString()}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 border-t border-border">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={() => {
+            if (resultUrl) {
+              setUploadedImage(resultUrl);
+              setMobileResultOpen(false);
+            }
+          }}
+        >
+          <Play className="w-3 h-3" />
+          {t.studio.useAsStartFrame}
+        </Button>
+      </div>
+    </>
+  );
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Mode Tabs - Top Navigation */}
@@ -399,225 +848,44 @@ export default function WorkspacePage() {
       </div>
 
       {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: Controls */}
-        <div className="w-80 border-r border-border bg-card flex flex-col">
-          {/* Selected Feature & Preset Card */}
-          <div className="p-4 border-b border-border shrink-0">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3 block">
-              {t.studio.selectedPreset}
-            </label>
-            <SelectedPresetCard
-              feature={selectedFeature}
-              preset={selectedPreset}
-              model={selectedModel}
-              mode={selectedMode}
-              onChangePresetClick={() => setPresetSelectorOpen(true)}
-              onChangeFeatureClick={() => setFeaturePickerOpen(true)}
-            />
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Left: Controls - Desktop */}
+        {!isMobile && (
+          <div className="w-80 border-r border-border bg-card flex flex-col">
+            {ControlsContent}
           </div>
+        )}
 
-          {/* Scrollable Form */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-5 min-h-0">
-            {/* Model Selection - from Database */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                {t.studio.model}
-                <Tooltip>
-                  <TooltipTrigger>
-                    <Info className="w-3 h-3" />
-                  </TooltipTrigger>
-                  <TooltipContent>{t.studio.aiEngine}</TooltipContent>
-                </Tooltip>
-              </label>
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger>
-                  <SelectValue placeholder={modelsLoading ? "Loading..." : "Select model"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelsLoading ? (
-                    <div className="p-2 text-sm text-muted-foreground">Loading models...</div>
-                  ) : dbModels.length === 0 ? (
-                    <div className="p-2 text-sm text-muted-foreground">No models available</div>
-                  ) : (
-                    dbModels.map((model) => (
-                      <SelectItem key={model.key} value={model.key}>
-                        <div className="flex items-center gap-2">
-                          <span>{model.title}</span>
-                          <Badge variant="outline" size="sm">{model.provider}</Badge>
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Image Upload */}
-            {requiresImage && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {t.studio.sourceImage}
-                </label>
-                {uploadedImage ? (
-                  <div className="relative rounded-lg overflow-hidden">
-                    <img
-                      src={uploadedImage}
-                      alt="Uploaded"
-                      className="w-full h-32 object-cover"
-                    />
-                    <Button
-                      variant="secondary"
-                      size="icon-sm"
-                      className="absolute top-2 right-2"
-                      onClick={() => setUploadedImage(null)}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
-                    <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
-                      {t.studio.dropImageOrClick}
-                    </p>
-                  </div>
-                )}
+        {/* Mobile Controls Sheet */}
+        {isMobile && (
+          <Sheet open={mobileSettingsOpen} onOpenChange={setMobileSettingsOpen}>
+            <SheetContent side="left" className="w-[85vw] p-0 sm:w-[400px]">
+              <div className="h-full flex flex-col bg-card">
+                {ControlsContent}
               </div>
-            )}
-
-            {/* Reference Image */}
-            {requiresReference && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {t.studio.referenceImage}
-                </label>
-                {referenceImage ? (
-                  <div className="relative rounded-lg overflow-hidden">
-                    <img
-                      src={referenceImage}
-                      alt="Reference"
-                      className="w-full h-32 object-cover"
-                    />
-                    <Button
-                      variant="secondary"
-                      size="icon-sm"
-                      className="absolute top-2 right-2"
-                      onClick={() => setReferenceImage(null)}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
-                    <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
-                      {t.studio.addReference}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Aspect Ratio */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                {t.studio.aspectRatio}
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {aspectRatios.slice(0, 6).map((ratio) => (
-                  <Button
-                    key={ratio.value}
-                    variant={aspectRatio === ratio.value ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setAspectRatio(ratio.value)}
-                    className="text-xs"
-                  >
-                    {ratio.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Duration (Video only) */}
-            {isVideoMode && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {t.studio.duration}
-                </label>
-                <div className="flex gap-2">
-                  {videoDurations.map((dur) => (
-                    <Button
-                      key={dur.value}
-                      variant={duration === dur.value ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setDuration(dur.value)}
-                      className="flex-1"
-                    >
-                      {dur.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Prompt Input */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                {t.studio.prompt}
-              </label>
-              <Textarea
-                variant="glow"
-                textareaSize="lg"
-                placeholder={
-                  selectedFeature?.requiredInputs.includes("prompt")
-                    ? t.studio.promptPlaceholder
-                    : t.studio.optionalPrompt
-                }
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                className="min-h-[100px]"
-              />
-            </div>
-          </div>
-
-          {/* Bottom Action Bar - Shrink-0 keeps it always visible */}
-          <div className="shrink-0 p-4 border-t border-border bg-card">
-            <div className="flex items-center gap-3">
-              <Badge variant="glow" size="sm" className="gap-1 shrink-0">
-                <span className="font-semibold">{calculateCost()}</span>
-                <Zap className="w-3 h-3" />
-              </Badge>
-              <Button
-                variant="glow"
-                size="default"
-                className="flex-1"
-                onClick={() => handleGenerate("generated")}
-                disabled={
-                  !selectedFeature ||
-                  (!prompt.trim() && selectedFeature.requiredInputs.includes("prompt")) ||
-                  canvasState === "generating"
-                }
-              >
-                <Sparkles className="w-4 h-4" />
-                {t.common.generate}
-              </Button>
-            </div>
-          </div>
-        </div>
+            </SheetContent>
+          </Sheet>
+        )}
 
         {/* Center: Canvas */}
         <div className="flex-1 flex flex-col overflow-hidden bg-background">
           {/* Canvas Toolbar */}
           <div className="shrink-0 px-4 py-2 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {currentMode && (
+              {/* Mobile Settings Toggle */}
+              {isMobile && (
+                <Button variant="ghost" size="icon-sm" onClick={() => setMobileSettingsOpen(true)}>
+                  <Settings2 className="w-4 h-4" />
+                </Button>
+              )}
+
+              {currentMode && !isMobile && (
                 <Badge variant="secondary" size="sm">
                   <currentMode.icon className="w-3 h-3 mr-1" />
                   {currentMode.name}
                 </Badge>
               )}
-              {selectedFeature && (
+              {selectedFeature && !isMobile && (
                 <span className="text-sm text-muted-foreground">
                   / {selectedFeature.name}
                 </span>
@@ -625,6 +893,13 @@ export default function WorkspacePage() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Mobile Results Toggle */}
+              {isMobile && canvasState === "ready" && (
+                <Button variant="ghost" size="icon-sm" onClick={() => setMobileResultOpen(true)}>
+                  <PanelRightOpen className="w-4 h-4" />
+                </Button>
+              )}
+
               {canvasState === "ready" && (
                 <>
                   <Tooltip>
@@ -689,115 +964,24 @@ export default function WorkspacePage() {
           />
         </div>
 
-        {/* Right: Metadata / Editor */}
-        {canvasState === "ready" && !editorOpen && metadata && (
+        {/* Right: Metadata / Editor - Desktop */}
+        {!isMobile && canvasState === "ready" && !editorOpen && metadata && (
           <div className="w-64 border-l border-border bg-card flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <h2 className="text-sm font-medium">{t.studio.resultActions}</h2>
-            </div>
-
-            <div className="flex-1 p-4 overflow-y-auto space-y-4">
-              {/* Quick Actions */}
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" size="sm" onClick={() => handleGenerate("generated", "Re-run")}>
-                  <RefreshCw className="w-3 h-3" />
-                  {t.common.rerun}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleGenerate("variation", "Variation")}>
-                  <Shuffle className="w-3 h-3" />
-                  {t.common.variation}
-                </Button>
-              </div>
-
-              {/* Prompt */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    {t.studio.prompt}
-                  </label>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={handleCopyPrompt}
-                  >
-                    {copied ? (
-                      <Check className="w-3 h-3 text-success" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-4">
-                  {prompt}
-                </p>
-              </div>
-
-              {/* Metadata */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between py-2 border-b border-border/50">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span className="text-xs">{t.studio.model}</span>
-                  </div>
-                  <Badge variant="secondary" size="sm">
-                    {selectedModel}
-                  </Badge>
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-border/50">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Hash className="w-3.5 h-3.5" />
-                    <span className="text-xs">{t.studio.seed}</span>
-                  </div>
-                  <span className="text-xs font-mono">{metadata.seed}</span>
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-border/50">
-                  <span className="text-xs text-muted-foreground">{t.studio.creditsUsed}</span>
-                  <Badge variant="outline" size="sm" className="gap-1">
-                    <span className="font-semibold">{metadata.creditsUsed}</span>
-                    <Zap className="w-3 h-3" />
-                  </Badge>
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span className="text-xs">{t.studio.createdAt}</span>
-                  </div>
-                  <span className="text-xs">
-                    {metadata.createdAt.toLocaleTimeString()}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Use as Reference */}
-            <div className="p-4 border-t border-border">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  if (resultUrl) {
-                    setUploadedImage(resultUrl);
-                  }
-                }}
-              >
-                <Play className="w-3 h-3" />
-                {t.studio.useAsStartFrame}
-              </Button>
-            </div>
+            <ResultContent />
           </div>
         )}
 
-        {/* Editor Panel */}
-        <EditorPanel
-          open={editorOpen}
-          onClose={() => setEditorOpen(false)}
-          feature={selectedFeature}
-          onApplyEdit={handleApplyEdit}
-        />
+        {/* Mobile Result Sheet */}
+        {isMobile && canvasState === "ready" && !editorOpen && metadata && (
+          <Sheet open={mobileResultOpen} onOpenChange={setMobileResultOpen}>
+            <SheetContent side="right" className="w-[85vw] p-0 sm:w-[350px]">
+              <div className="h-full flex flex-col bg-card">
+                <ResultContent />
+              </div>
+            </SheetContent>
+          </Sheet>
+        )}
+
         {/* Editor Panel */}
         <EditorPanel
           open={editorOpen}

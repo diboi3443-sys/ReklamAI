@@ -256,7 +256,7 @@ export default function AssetsPage() {
               <SelectItem value="all">{t.common.all} Boards</SelectItem>
               {mockBoards.map((board) => (
                 <SelectItem key={board.id} value={board.id}>
-                  {board.name}
+                  {board.title}
                 </SelectItem>
               ))}
             </SelectContent>

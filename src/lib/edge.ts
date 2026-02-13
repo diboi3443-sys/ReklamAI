@@ -1,19 +1,8 @@
-// Edge Functions API client wrapper
-import { getAuthToken, supabase } from './supabase';
-
-// Support both Vite env vars and window.APP_CONFIG
-const getSupabaseUrl = (): string => {
-  if (import.meta.env.VITE_SUPABASE_URL) {
-    return import.meta.env.VITE_SUPABASE_URL.replace(/\/$/, '');
-  }
-  if (typeof window !== 'undefined' && (window as any).APP_CONFIG?.VITE_SUPABASE_URL) {
-    return (window as any).APP_CONFIG.VITE_SUPABASE_URL.replace(/\/$/, '');
-  }
-  return '';
-};
-
-const EDGE_FUNCTIONS_URL = getSupabaseUrl();
-const EDGE_FUNCTIONS_BASE = `${EDGE_FUNCTIONS_URL}/functions/v1`;
+/**
+ * ReklamAI v2.0 — Edge Functions / API wrapper
+ * Now talks to FastAPI backend instead of Supabase Edge Functions.
+ */
+import { apiFetch, getToken } from './api';
 
 export interface UploadFileParams {
   file: File;
@@ -64,164 +53,112 @@ export interface DownloadResponse {
   error?: string;
 }
 
-async function callEdgeFunction(
-  functionName: string,
-  options: {
-    method?: string;
-    body?: any;
-    headers?: Record<string, string>;
-  } = {}
-): Promise<Response> {
-  const token = await getAuthToken();
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${EDGE_FUNCTIONS_BASE}/${functionName}`, {
-    method: options.method || 'POST',
-    headers,
-    body: options.body instanceof FormData ? options.body : JSON.stringify(options.body),
-  });
-
-  return response;
-}
-
+/**
+ * Upload a file to the backend.
+ */
 export async function uploadFile(params: UploadFileParams): Promise<UploadFileResponse> {
-  const token = await getAuthToken();
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
 
-  if (!token) {
-    throw new Error('Not authenticated');
-  }
+  const formData = new FormData();
+  formData.append('file', params.file);
+  formData.append('purpose', params.purpose);
 
-  // Step 1: Request upload path from Edge Function
-  const pathResponse = await fetch(`${EDGE_FUNCTIONS_BASE}/upload`, {
+  const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+
+  const res = await fetch(`${API_BASE}/api/upload`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      purpose: params.purpose,
-      generationId: params.generationId,
-      fileName: params.file.name,
-      fileSize: params.file.size,
-      contentType: params.file.type || 'application/octet-stream',
-    }),
+    body: formData,
   });
 
-  const pathData = await pathResponse.json();
-
-  if (!pathResponse.ok) {
-    throw new Error(pathData.error || 'Failed to get upload path');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    return {
+      success: false,
+      bucket: '',
+      path: '',
+      generationId: null,
+      error: body.detail || `Upload failed: ${res.status}`,
+    };
   }
 
-  // Step 2: Upload file directly to Storage using Supabase client
-  // This uses RLS policies, so user can only upload to their own path
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('uploads')
-    .upload(pathData.path, params.file, {
-      contentType: params.file.type || 'application/octet-stream',
-      upsert: false,
+  return await res.json();
+}
+
+/**
+ * Start a new generation via FastAPI.
+ */
+export async function generate(params: GenerateParams): Promise<GenerateResponse> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
+
+  try {
+    const data = await apiFetch<any>('/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: params.prompt,
+        preset_slug: params.presetKey,
+        model_slug: params.modelKey,
+        input_image_url: params.input?.startFramePath,
+        reference_image_url: params.input?.referenceImagePath,
+        params: params.input?.params,
+      }),
     });
 
-  if (uploadError) {
-    throw new Error(`Upload to Storage failed: ${uploadError.message}`);
+    return {
+      generationId: data.id,
+      status: data.status,
+      providerTaskId: data.provider_task_id,
+    };
+  } catch (error: any) {
+    // Handle specific HTTP errors
+    if (error.status === 401) {
+      console.error('[Generate] 401 — clearing token');
+      const { clearToken } = await import('./api');
+      clearToken();
+      window.location.reload();
+      throw new Error('Session expired. Reloading...');
+    }
+    if (error.status === 402) {
+      const err = new Error(error.body?.detail || 'Insufficient credits');
+      (err as any).code = 402;
+      (err as any).type = 'insufficient_credits';
+      throw err;
+    }
+    throw error;
   }
+}
 
-  // Return the path and metadata
+/**
+ * Check generation status via FastAPI.
+ */
+export async function getStatus(generationId: string): Promise<StatusResponse> {
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
+
+  const data = await apiFetch<any>(`/api/generations/${generationId}`);
+
   return {
-    success: true,
-    bucket: 'uploads',
-    path: pathData.path,
-    generationId: pathData.generationId || null,
+    status: data.status,
+    progress: data.progress,
+    signedPreviewUrl: data.result_url,
   };
 }
 
-export async function generate(params: GenerateParams): Promise<GenerateResponse> {
-  const response = await callEdgeFunction('generate', {
-    method: 'POST',
-    body: params,
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    // Handle 402 Payment Required (Insufficient credits)
-    if (response.status === 402) {
-      const error = new Error(data.error || data.message || 'Insufficient credits');
-      (error as any).code = 402;
-      (error as any).type = 'insufficient_credits';
-      throw error;
-    }
-    // Handle 502 Bad Gateway (Provider error or timeout)
-    if (response.status === 502 || response.status === 504) {
-      const error = new Error(
-        data.error || data.message || 
-        (response.status === 504 ? 'Generation timeout - please try again' : 'Provider error - please try again later')
-      );
-      (error as any).code = response.status;
-      (error as any).type = response.status === 504 ? 'timeout' : 'provider_error';
-      (error as any).provider = data.provider;
-      (error as any).hint = data.hint;
-      throw error;
-    }
-    // Handle structured 422 error from KIE
-    if (response.status === 422 && data.code === 422 && data.provider === 'kie') {
-      const error = new Error(data.message || 'Model not supported');
-      (error as any).code = 422;
-      (error as any).provider = 'kie';
-      (error as any).modelSent = data.modelSent;
-      (error as any).modelKey = data.modelKey;
-      (error as any).hint = data.hint;
-      throw error;
-    }
-    throw new Error(data.error || data.message || 'Generation failed');
-  }
-
-  return data;
-}
-
-export async function getStatus(generationId: string): Promise<StatusResponse> {
-  const token = await getAuthToken();
-
-  if (!token) {
-    throw new Error('Not authenticated');
-  }
-
-  const response = await fetch(`${EDGE_FUNCTIONS_BASE}/status?generationId=${generationId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Status check failed');
-  }
-
-  return data;
-}
-
+/**
+ * Download a generation result.
+ */
 export async function download(generationId: string): Promise<DownloadResponse> {
-  const response = await callEdgeFunction('download', {
-    method: 'POST',
-    body: { generationId },
-  });
+  const token = getToken();
+  if (!token) throw new Error('Not authenticated');
 
-  const data = await response.json();
+  const data = await apiFetch<any>(`/api/generations/${generationId}`);
 
-  if (!response.ok) {
-    throw new Error(data.error || 'Download failed');
-  }
-
-  return data;
+  return {
+    url: data.result_url || '',
+    expiresAt: null,
+  };
 }
